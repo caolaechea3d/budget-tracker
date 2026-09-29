@@ -1,0 +1,11 @@
+# Python / virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# Personal data: expenses, receipts and backups of every user. Never commit this.
+data/
+*.csv
+
+# Editor settings (PyCharm)
+.idea/

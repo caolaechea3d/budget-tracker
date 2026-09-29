@@ -1,0 +1,3 @@
+# Optional: draws the colorful category icons. Without it the app still works,
+# showing plain black-and-white emoji instead.
+pillow>=10
