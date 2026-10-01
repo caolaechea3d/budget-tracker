@@ -48,6 +48,10 @@ python main.py
 - **Sorting** – click any column heading (category, date, amount, payment…) to sort; click
   again to reverse.
 - **Filters** – category, payment method and tag (e.g. everything tagged `#cusco-trip`).
+- **Undo / redo** (Ctrl+Z / Ctrl+Y, the Edit menu, or the button in the status bar) for adding,
+  editing and deleting expenses and income, imports and added recurring expenses — several steps
+  back, receipts included. The history lasts until you switch user or close the app. Settings
+  changes (budgets, category manager, recurring templates) aren't undoable.
 - **Search** (Ctrl+F) looks through all months by description, category, payment method or tag
   (`#tag` matches tags only).
 - **File menu** – import a bank statement CSV (column mapping, `;` or `,`, `1.234,56` amounts,

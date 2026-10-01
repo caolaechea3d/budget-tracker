@@ -8,12 +8,75 @@ from collections.abc import Callable
 from datetime import date
 from tkinter import simpledialog, ttk
 
+from ..storage import parse_tags
 from .icons import Icons
 
 # (name, icon, color) for each choice in a Picker.
 Option = tuple[str, str, str]
 
 ACCENT = "#2a9d8f"
+MAX_TAGS_IN_MENU = 20
+
+
+class TagField(ttk.Frame):
+    """A comma-separated tags entry with a 🏷 ▾ menu of existing tags to tick on/off.
+
+    `get_tags` returns the known tags, most recently used first. Typing new tags still works.
+    """
+
+    def __init__(self, master: tk.Misc, variable: tk.StringVar, get_tags: Callable[[], list[str]],
+                 width: int = 24, icons: Icons | None = None):
+        super().__init__(master)
+        self.variable = variable
+        self.get_tags = get_tags
+        self.entry = ttk.Entry(self, textvariable=variable, width=width)
+        self.entry.pack(side="left", fill="x", expand=True)
+        image = icons.get("🏷", "#8d99ae", badge=False) if icons else None
+        # The menubutton draws its own ▾ arrow next to the tag icon.
+        self.button = ttk.Menubutton(self, image=image or "", text="" if image else "🏷",
+                                     compound="left", style="Picker.TMenubutton", takefocus=False)
+        self.button.pack(side="left", padx=(2, 0))
+        self.menu = tk.Menu(self.button, tearoff=False, postcommand=self._rebuild)
+        self.button["menu"] = self.menu
+        self._checks: list[tk.BooleanVar] = []  # keep the menu's check variables alive
+        self.entry.bind("<Alt-Down>", lambda _e: self.open_menu())
+
+    def current(self) -> list[str]:
+        return parse_tags(self.variable.get())
+
+    def _rebuild(self) -> None:
+        self.menu.delete(0, "end")
+        self._checks = []
+        chosen = self.current()
+        known = self.get_tags()[:MAX_TAGS_IN_MENU]
+        # Tags typed here that aren't saved anywhere yet still show, so they can be unticked.
+        tags = [*[t for t in chosen if t not in known], *known]
+        if not tags:
+            self.menu.add_command(label="No tags yet — type one, e.g. work", state="disabled")
+            return
+        self.menu.add_command(label="Recent tags", state="disabled")
+        for tag in tags:
+            var = tk.BooleanVar(value=tag in chosen)
+            self._checks.append(var)
+            self.menu.add_checkbutton(label=f"#{tag}", variable=var, command=lambda t=tag: self.toggle(t))
+        if chosen:
+            self.menu.add_separator()
+            self.menu.add_command(label="Clear tags", command=lambda: self.variable.set(""))
+
+    def toggle(self, tag: str) -> None:
+        tags = self.current()
+        if tag in tags:
+            tags.remove(tag)
+        else:
+            tags.append(tag)
+        self.variable.set(", ".join(tags))
+        self.entry.focus_set()
+        self.entry.icursor("end")
+
+    def open_menu(self) -> str:
+        self._rebuild()
+        self.menu.tk_popup(self.entry.winfo_rootx(), self.entry.winfo_rooty() + self.entry.winfo_height())
+        return "break"
 
 
 YEAR_SUFFIX = " · whole year"

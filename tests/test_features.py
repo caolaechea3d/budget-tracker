@@ -190,6 +190,17 @@ class ReportsTest(unittest.TestCase):
         incomes = [Income(D("1000"), "Salary", date=date(2026, 9, 1), rate=D("4"))]
         self.assertEqual(balance(self.expenses, incomes, "2026-09", "PEN"), (D("1000"), D("240"), D("760")))
 
+    def test_recent_tags(self):
+        from expense_tracker.reports import recent_tags
+        expenses = [
+            Expense(D("1"), "Food", date=date(2026, 9, 1), tags=["work", "lunch"]),
+            Expense(D("1"), "Food", date=date(2026, 9, 20), tags=["cusco-trip"]),
+            Expense(D("1"), "Food", date=date(2026, 9, 10), tags=["work"]),
+            Expense(D("1"), "Food", date=date(2026, 9, 20), tags=["airport"]),
+        ]
+        self.assertEqual(recent_tags(expenses), ["airport", "cusco-trip", "work", "lunch"])
+        self.assertEqual(recent_tags([]), [])
+
     def test_search(self):
         taxi = self.expenses[3]
         self.assertTrue(matches(taxi, "airport"))

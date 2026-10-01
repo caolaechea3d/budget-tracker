@@ -226,7 +226,7 @@ class Shell:
         if self.current is not None:
             self.current.destroy()
         self.root.configure(menu="")
-        for sequence in ("<Return>", "<Control-f>", "<Control-n>"):
+        for sequence in ("<Return>", "<Control-f>", "<Control-n>", "<Control-z>", "<Control-y>"):
             self.root.unbind(sequence)
 
     def show_start(self) -> None:

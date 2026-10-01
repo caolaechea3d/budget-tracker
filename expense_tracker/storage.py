@@ -397,6 +397,31 @@ class ExpenseStore:
         doc["version"] = DATA_VERSION
         write_json_atomic(self.path, doc)
 
+    # --- whole-document snapshots (used by undo) ---
+
+    def snapshot(self) -> dict:
+        """A copy of everything in the data file, as it is right now."""
+        return self._read()
+
+    def restore(self, doc: dict) -> None:
+        """Put back a snapshot, then bring receipt files in line with it."""
+        self._write(doc)
+        self._reconcile_receipts(doc)
+
+    def _reconcile_receipts(self, doc: dict) -> None:
+        """Receipts the data refers to are brought back from receipts/removed; unused ones are set aside there."""
+        if not self.receipts_dir.exists():
+            return
+        referenced = {e["receipt"] for e in doc.get("expenses", []) if e.get("receipt")}
+        removed = self.receipts_dir / "removed"
+        for name in referenced:
+            path, parked = self.receipts_dir / name, removed / name
+            if not path.exists() and parked.exists():
+                os.replace(parked, path)
+        for path in self.receipts_dir.iterdir():
+            if path.is_file() and path.name not in referenced:
+                self._retire_receipt(path.name)
+
     # --- backups ---
 
     def _daily_backup(self) -> None:

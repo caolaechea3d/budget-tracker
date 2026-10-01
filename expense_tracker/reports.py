@@ -137,6 +137,16 @@ def balance(expenses: list[Expense], incomes: list[Income], month: str | None, c
     return earned, spent, earned - spent
 
 
+def recent_tags(expenses: list[Expense]) -> list[str]:
+    """Every tag in use, most recently used first (by expense date; ties in A→Z order)."""
+    last_used: dict[str, object] = {}
+    for e in expenses:
+        for tag in e.tags:
+            if tag not in last_used or e.date > last_used[tag]:
+                last_used[tag] = e.date
+    return sorted(last_used, key=lambda t: (-last_used[t].toordinal(), t))
+
+
 def matches(expense: Expense, query: str) -> bool:
     """Case-insensitive search over description, category, subcategory, payment method and tags.
 

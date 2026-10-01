@@ -19,8 +19,8 @@ from ...reports import (
     matches,
 )
 from ...storage import Expense, format_money, format_rate, month_key, total_in
-from ..forms import ExpenseDialog, MoneyFields, expense_from_fields, open_file
-from ..widgets import DateField, Picker, SortableColumns, text_key
+from ..forms import ExpenseDialog, MoneyFields, expense_from_fields, open_file, short_name
+from ..widgets import DateField, Picker, SortableColumns, TagField, text_key
 from .base import EXPENSE_COLOR, PageData, Tab
 
 
@@ -93,11 +93,12 @@ class ExpensesTab(Tab):
             ttk.Label(form, text=label).grid(row=0, column=col, sticky="w", padx=(0, 8))
             widget.grid(row=1, column=col, sticky="w", padx=(0, 8))
         ttk.Label(form, text="Description").grid(row=2, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(form, text="Tags (comma separated)").grid(row=2, column=4, sticky="w", pady=(6, 0))
+        ttk.Label(form, text="Tags (type, or pick a recent one)").grid(row=2, column=4, sticky="w", pady=(6, 0))
         description = ttk.Entry(form, textvariable=self.q_description)
         description.grid(row=3, column=0, columnspan=4, sticky="ew", padx=(0, 8))
-        tags = ttk.Entry(form, textvariable=self.q_tags)
-        tags.grid(row=3, column=4, columnspan=2, sticky="ew", padx=(0, 8))
+        tag_field = TagField(form, self.q_tags, app.recent_tags, icons=self.icons)
+        tag_field.grid(row=3, column=4, columnspan=2, sticky="ew", padx=(0, 8))
+        tags = tag_field.entry
         buttons = ttk.Frame(form)
         buttons.grid(row=3, column=6, sticky="ew")
         ttk.Button(buttons, text="Add", command=self.add_expense).pack(side="left", fill="x", expand=True)
@@ -309,7 +310,7 @@ class ExpensesTab(Tab):
                 self.quick.rate_var.get(), self.q_category.get(), self.q_description.get(),
                 subcategory=self.q_subcategory.get(), payment_method=self.q_payment.get(), tags=self.q_tags.get(),
             )
-            self.app.store.add(expense)
+            self.app.history.record(f"Add {short_name(expense)}", lambda: self.app.store.add(expense))
         except ValueError as exc:
             messagebox.showerror("Invalid expense", str(exc))
             return
@@ -401,9 +402,13 @@ class ExpensesTab(Tab):
             self.app.set_status("Select one or more expenses to delete.")
             return
         noun = "this expense" if len(selected) == 1 else f"these {len(selected)} expenses"
-        if not messagebox.askyesno("Delete", f"Delete {noun}?"):
+        if not messagebox.askyesno("Delete", f"Delete {noun}?\n\nYou can undo this with Ctrl+Z."):
             return
-        for expense_id in selected:
-            self.app.store.delete(expense_id)
+        if len(selected) == 1:
+            one = next((e for e in self.shown if e.id == selected[0]), None)
+            label = f"Delete {short_name(one)}" if one else "Delete 1 expense"
+        else:
+            label = f"Delete {len(selected)} expenses"
+        self.app.history.record(label, lambda: [self.app.store.delete(i) for i in selected])
         self.app.set_status(f"Deleted {len(selected)} expense(s).")
         self.app.refresh()

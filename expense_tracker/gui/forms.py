@@ -26,7 +26,7 @@ from ..storage import (
     parse_rate,
     parse_tags,
 )
-from .widgets import DateField, Dialog, MonthChoices, Picker, labeled
+from .widgets import DateField, Dialog, MonthChoices, Picker, TagField, labeled
 
 if TYPE_CHECKING:
     from .app import ExpenseApp
@@ -109,6 +109,13 @@ def preview_text(amount_text: str, currency_text: str, rate_text: str) -> str:
     return f"= {format_money(e.amount_pen, 'PEN')}  /  {format_money(e.amount_usd, 'USD')}"
 
 
+def short_name(record: Expense | Income) -> str:
+    """A short quoted name for undo labels: the description, or else the (sub)category/source."""
+    name = record.description or getattr(record, "subcategory", "") or getattr(record, "category", "") \
+        or getattr(record, "source", "")
+    return f"“{name[:28]}…”" if len(name) > 28 else f"“{name}”"
+
+
 def open_file(path: Path) -> None:
     if hasattr(os, "startfile"):
         os.startfile(path)  # Windows
@@ -187,7 +194,7 @@ class ExpenseDialog(Dialog):
             on_new=app.add_payment_method, new_label="New payment method…", width=22,
         ), sticky="ew")
         labeled(b, 8, "Description", ttk.Entry(b, textvariable=self.description_var, width=38), sticky="ew")
-        labeled(b, 9, "Tags (comma separated)", ttk.Entry(b, textvariable=self.tags_var, width=38), sticky="ew")
+        labeled(b, 9, "Tags", TagField(b, self.tags_var, app.recent_tags, width=34, icons=app.icons), sticky="ew")
 
         receipt_row = ttk.Frame(b)
         self.receipt_label = ttk.Label(receipt_row, style="Muted.TLabel")
@@ -250,17 +257,24 @@ class ExpenseDialog(Dialog):
                 tags=self.tags_var.get(),
             )
             store = self.app.store
-            if self.original:
-                expense.receipt = self.original.receipt
-                expense.recurring_id = self.original.recurring_id
-                if not store.update(expense):
-                    raise ValueError("This expense no longer exists (was it deleted?)")
-                if self.remove_receipt and not self.pending_receipt:
-                    store.remove_receipt(expense.id)
-            else:
-                store.add(expense)
-            if self.pending_receipt:
-                expense = store.attach_receipt(expense.id, self.pending_receipt)
+
+            def save() -> Expense:
+                saved = expense
+                if self.original:
+                    saved.receipt = self.original.receipt
+                    saved.recurring_id = self.original.recurring_id
+                    if not store.update(saved):
+                        raise ValueError("This expense no longer exists (was it deleted?)")
+                    if self.remove_receipt and not self.pending_receipt:
+                        store.remove_receipt(saved.id)
+                else:
+                    store.add(saved)
+                if self.pending_receipt:
+                    saved = store.attach_receipt(saved.id, self.pending_receipt)
+                return saved
+
+            verb = "Edit" if self.original else "Add"
+            expense = self.app.history.record(f"{verb} {short_name(expense)}", save)
         except ValueError as exc:
             messagebox.showerror("Invalid expense", str(exc), parent=self)
             return False
@@ -306,11 +320,17 @@ class IncomeDialog(Dialog):
                 self.money.rate_var.get(), self.source_var.get(), self.description_var.get(),
                 income_id=self.original.id if self.original else None,
             )
-            if self.original:
-                if not self.app.store.update_income(income):
-                    raise ValueError("This income no longer exists (was it deleted?)")
-            else:
-                self.app.store.add_income(income)
+            store = self.app.store
+
+            def save() -> None:
+                if self.original:
+                    if not store.update_income(income):
+                        raise ValueError("This income no longer exists (was it deleted?)")
+                else:
+                    store.add_income(income)
+
+            verb = "Edit" if self.original else "Add"
+            self.app.history.record(f"{verb} income {short_name(income)}", save)
         except ValueError as exc:
             messagebox.showerror("Invalid income", str(exc), parent=self)
             return False
@@ -439,7 +459,10 @@ class DueRecurringDialog(Dialog):
         add, skip = [], []
         for (item, month), var in zip(self.due, self.checks):
             (add if var.get() else skip).append((item.id, month))
-        created = self.app.store.apply_recurring(add, skip, rate)
+        created = self.app.history.record(
+            "Add recurring expenses" if add else "Skip recurring expenses",
+            lambda: self.app.store.apply_recurring(add, skip, rate),
+        )
         self.app.recurring_applied(created, len(skip))
         return True
 

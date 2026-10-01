@@ -9,7 +9,7 @@ from tkinter import messagebox, ttk
 from ...catalog import find_item
 from ...reports import in_month
 from ...storage import Income, format_money, format_rate, month_key, total_in
-from ..forms import IncomeDialog, MoneyFields, income_from_fields
+from ..forms import IncomeDialog, MoneyFields, income_from_fields, short_name
 from ..widgets import DateField, Picker, SortableColumns, text_key
 from .base import INCOME_COLOR, PageData, Tab
 
@@ -120,7 +120,7 @@ class IncomeTab(Tab):
                 self.i_date.get(), self.quick.amount_var.get(), self.quick.currency_var.get(),
                 self.quick.rate_var.get(), self.i_source.get(), self.i_description.get(),
             )
-            self.app.store.add_income(income)
+            self.app.history.record(f"Add income {short_name(income)}", lambda: self.app.store.add_income(income))
         except ValueError as exc:
             messagebox.showerror("Invalid income", str(exc))
             return
@@ -149,9 +149,9 @@ class IncomeTab(Tab):
 
     def delete_selected(self) -> None:
         selected = self.tree.selection()
-        if selected and messagebox.askyesno(
-            "Delete", f"Delete {len(selected)} income entr{'y' if len(selected) == 1 else 'ies'}?"
-        ):
-            for income_id in selected:
-                self.app.store.delete_income(income_id)
+        noun = f"{len(selected)} income entr{'y' if len(selected) == 1 else 'ies'}"
+        if selected and messagebox.askyesno("Delete", f"Delete {noun}?\n\nYou can undo this with Ctrl+Z."):
+            self.app.history.record(f"Delete {noun}",
+                                    lambda: [self.app.store.delete_income(i) for i in selected])
+            self.app.set_status(f"Deleted {noun}.")
             self.app.refresh()

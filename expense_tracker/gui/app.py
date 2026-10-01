@@ -16,7 +16,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from .. import APP_NAME
 from ..catalog import PALETTE, Category, Item, category_look, find_category, find_item
-from ..reports import balance, is_year
+from ..reports import balance, is_year, recent_tags
 from ..storage import (
     CURRENCIES,
     DEFAULT_CURRENCY,
@@ -30,6 +30,7 @@ from ..storage import (
     format_rate,
     month_key,
 )
+from ..undo import UndoHistory
 from ..users import User
 from .forms import DueRecurringDialog, open_file
 from .icons import Icons
@@ -64,6 +65,7 @@ class ExpenseApp(ttk.Frame):
         self.rowconfigure(1, weight=1)
         setup_style(self, self.icons)
         self.reload_catalog()
+        self.history = UndoHistory(store)  # undo/redo for expense & income changes (this session only)
 
         self.month_var = tk.StringVar(value=month_key(date.today()))
         self.show_in_var = tk.StringVar(value=DEFAULT_CURRENCY)
@@ -80,10 +82,11 @@ class ExpenseApp(ttk.Frame):
         self.budgets_tab = BudgetsTab(self)
         self.recurring_tab = RecurringTab(self)
         self.tabs = [self.expenses_tab, self.income_tab, self.charts_tab, self.budgets_tab, self.recurring_tab]
-        ttk.Label(self, textvariable=self.status_var, style="Muted.TLabel").grid(
-            row=2, column=0, sticky="w", padx=12, pady=(0, 6))
+        self._build_status_bar()
 
         self.search_var.trace_add("write", lambda *_: self.refresh())
+        master.bind("<Control-z>", lambda _e: self.undo())
+        master.bind("<Control-y>", lambda _e: self.redo())
         master.bind("<Control-f>", lambda _e: self.search_entry.focus_set())
         master.bind("<Control-n>", lambda _e: (self.notebook.select(self.expenses_tab),
                                                self.expenses_tab.focus_quick_add()))
@@ -118,10 +121,13 @@ class ExpenseApp(ttk.Frame):
     def next_color(self) -> str:
         return PALETTE[len(self.categories) % len(PALETTE)]
 
+    # "New…" entries in the dropdowns. They're undoable steps too, so they don't block undoing
+    # the changes made before them.
+
     def add_category(self, name: str) -> None:
         if not find_category(self.categories, name):
             self.categories.append(Category(name, color=self.next_color()))
-            self.store.save_categories(self.categories)
+            self.history.record(f"Add category “{name}”", lambda: self.store.save_categories(self.categories))
 
     def add_subcategory(self, category: str, name: str) -> None:
         if not category:
@@ -132,17 +138,23 @@ class ExpenseApp(ttk.Frame):
             self.categories.append(cat)
         if not cat.subcategory(name):
             cat.subcategories.append(Item(name, cat.icon))
-            self.store.save_categories(self.categories)
+            self.history.record(f"Add subcategory “{name}”", lambda: self.store.save_categories(self.categories))
 
     def add_payment_method(self, name: str) -> None:
         if not find_item(self.payment_methods, name):
             self.payment_methods.append(Item(name, "💳"))
-            self.store.save_payment_methods(self.payment_methods)
+            self.history.record(f"Add payment method “{name}”",
+                                lambda: self.store.save_payment_methods(self.payment_methods))
 
     def add_income_source(self, name: str) -> None:
         if not find_item(self.income_sources, name):
             self.income_sources.append(Item(name, "💰"))
-            self.store.save_income_sources(self.income_sources)
+            self.history.record(f"Add income source “{name}”",
+                                lambda: self.store.save_income_sources(self.income_sources))
+
+    def recent_tags(self) -> list[str]:
+        """Tags for the 🏷 ▾ menus, most recently used first (from the data of the last refresh)."""
+        return recent_tags(self.expenses_tab.expenses)
 
     def look(self, category: str, subcategory: str = "") -> tuple[str, str]:
         return category_look(self.categories, category, subcategory)
@@ -176,6 +188,10 @@ class ExpenseApp(ttk.Frame):
             file_menu.add_command(label="Switch user…", command=self.on_switch_user)
         file_menu.add_command(label="Exit", command=master.destroy)
         menubar.add_cascade(label="File", menu=file_menu)
+        self.edit_menu = tk.Menu(menubar, tearoff=False, postcommand=self._update_edit_menu)
+        self.edit_menu.add_command(label="Undo", accelerator="Ctrl+Z", command=self.undo)
+        self.edit_menu.add_command(label="Redo", accelerator="Ctrl+Y", command=self.redo)
+        menubar.add_cascade(label="Edit", menu=self.edit_menu)
         settings = tk.Menu(menubar, tearoff=False)
         settings.add_command(label="Categories & icons…", command=lambda: CategoriesDialog(self))
         settings.add_command(label="Payment methods…", command=lambda: ItemsDialog(
@@ -247,6 +263,53 @@ class ExpenseApp(ttk.Frame):
             label = ttk.Label(card, textvariable=var, style=style)
             label.pack(anchor="e")
             self.card_vars[key] = (var, label)
+
+    def _build_status_bar(self) -> None:
+        bar = ttk.Frame(self)
+        bar.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 6))
+        bar.columnconfigure(0, weight=1)
+        ttk.Label(bar, textvariable=self.status_var, style="Muted.TLabel").grid(row=0, column=0, sticky="w")
+        self.undo_button = ttk.Button(bar, style="Link.TButton", command=self.undo)
+        self.redo_button = ttk.Button(bar, style="Link.TButton", command=self.redo)
+        self.undo_button.grid(row=0, column=1, padx=(8, 0))
+        self.redo_button.grid(row=0, column=2, padx=(6, 0))
+
+    # ---------- undo / redo ----------
+
+    def undo(self) -> None:
+        self._step(self.history.undo, "Undone")
+
+    def redo(self) -> None:
+        self._step(self.history.redo, "Redone")
+
+    def _step(self, action: Callable[[], str], verb: str) -> None:
+        if self.grab_current():  # a dialog is open: don't change data underneath it
+            return
+        try:
+            label = action()
+        except ValueError as exc:
+            self.set_status(str(exc))
+            self.refresh()
+            return
+        self.reload_catalog()  # the restored data may include catalog changes made in dialogs
+        self.set_status(f"{verb}: {label}")
+        self.refresh()
+
+    def _update_undo_buttons(self) -> None:
+        for button, label, arrow, name in ((self.undo_button, self.history.next_undo(), "↶", "Undo"),
+                                          (self.redo_button, self.history.next_redo(), "↷", "Redo")):
+            if label:
+                button.configure(text=f"{arrow} {name}: {label}")
+                button.grid()
+            else:
+                button.grid_remove()
+
+    def _update_edit_menu(self) -> None:
+        undo, redo = self.history.next_undo(), self.history.next_redo()
+        self.edit_menu.entryconfigure(0, label=f"Undo {undo}" if undo else "Undo",
+                                      state="normal" if undo else "disabled")
+        self.edit_menu.entryconfigure(1, label=f"Redo {redo}" if redo else "Redo",
+                                      state="normal" if redo else "disabled")
 
     # ---------- period ----------
 
@@ -406,3 +469,4 @@ class ExpenseApp(ttk.Frame):
 
         for tab in self.tabs:
             tab.redraw(data)
+        self._update_undo_buttons()

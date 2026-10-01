@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 from expense_tracker.gui import RATE_MISSING, expense_from_fields, preview_text
-from expense_tracker.gui.widgets import MonthChoices, SortableColumns, month_label, text_key
+from expense_tracker.gui.widgets import MonthChoices, SortableColumns, TagField, month_label, text_key
 
 D = Decimal
 
@@ -82,6 +82,33 @@ class GuiHelpersTest(unittest.TestCase):
             self.assertEqual([r[1] for r in sorter.apply(rows)], ["cash", "Credit card", "Yape", ""])
             self.assertEqual((tree.heading("payment", "text"), tree.heading("amount", "text")), ("Payment ▲", "Amount"))
             self.assertEqual(len(calls), 2)
+        finally:
+            root.destroy()
+
+    def test_tag_field_menu(self):
+        import tkinter as tk
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            var = tk.StringVar(root, value="Lima Trip")
+            field = TagField(root, var, lambda: ["cusco-trip", "work", "lima-trip"])
+            field._rebuild()
+            labels = [field.menu.entrycget(i, "label") for i in range(field.menu.index("end") + 1)
+                      if field.menu.type(i) != "separator"]
+            self.assertEqual(labels, ["Recent tags", "#cusco-trip", "#work", "#lima-trip", "Clear tags"])
+            self.assertEqual([v.get() for v in field._checks], [False, False, True])  # typed tag is ticked
+            field.toggle("work")
+            self.assertEqual(var.get(), "lima-trip, work")
+            field.toggle("lima-trip")
+            self.assertEqual(var.get(), "work")
+            var.set("brand new")  # typed but not saved anywhere yet: still listed so it can be unticked
+            field._rebuild()
+            self.assertEqual(field.menu.entrycget(1, "label"), "#brand-new")
+            field.menu.invoke(field.menu.index("end"))  # "Clear tags"
+            self.assertEqual(var.get(), "")
+            empty = TagField(root, tk.StringVar(root), lambda: [])
+            empty._rebuild()
+            self.assertEqual(empty.menu.entrycget(0, "state"), "disabled")
         finally:
             root.destroy()
 

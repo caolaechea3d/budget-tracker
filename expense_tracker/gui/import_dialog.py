@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from ..importer import DATE_FORMATS, SIGN_CHOICES, ImportOptions, build_expenses, guess_columns, read_csv
 from ..storage import CURRENCIES, DEFAULT_CURRENCY, format_rate, parse_currency, parse_rate, parse_tags
 from .forms import RATE_MISSING
-from .widgets import Dialog, Picker
+from .widgets import Dialog, Picker, TagField
 
 if TYPE_CHECKING:
     from .app import ExpenseApp
@@ -80,7 +80,7 @@ class ImportDialog(Dialog):
         row(3, 1, "Payment method", Picker(form, app.icons, self.payment_var, app.payment_options, none_label="(none)", width=20))
         row(4, 0, "Currency", combo(self.currency_var, list(CURRENCIES), 7))
         row(4, 1, "Rate (S/ per US$1)", ttk.Entry(form, textvariable=self.rate_var, width=10))
-        row(5, 0, "Tags for all rows", ttk.Entry(form, textvariable=self.tags_var, width=24))
+        row(5, 0, "Tags for all rows", TagField(form, self.tags_var, app.recent_tags, width=20, icons=app.icons))
 
         ttk.Label(b, textvariable=self.summary_var, style="Bold.TLabel").grid(row=3, column=0, sticky="w", pady=(10, 0))
         self.errors_label = ttk.Label(b, style="Warning.TLabel", wraplength=640, justify="left")
@@ -144,6 +144,7 @@ class ImportDialog(Dialog):
         if not result.expenses:
             messagebox.showinfo("Import", "There is nothing to import with these settings.", parent=self)
             return False
-        self.app.store.add_many(result.expenses)
+        self.app.history.record(f"Import {len(result.expenses)} expenses",
+                                lambda: self.app.store.add_many(result.expenses))
         self.app.imported(len(result.expenses), result.duplicates)
         return True
