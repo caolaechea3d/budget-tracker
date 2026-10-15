@@ -9,6 +9,17 @@ from expense_tracker.gui.widgets import MonthChoices, SortableColumns, TagField,
 D = Decimal
 
 
+def hidden_root(test: unittest.TestCase):
+    """A hidden Tk window for widget tests, or skip the test where no window can be opened."""
+    import tkinter as tk
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        test.skipTest(f"Tk can't open a window here: {exc}")
+    root.withdraw()
+    return root
+
+
 class GuiHelpersTest(unittest.TestCase):
     def test_expense_from_fields_keeps_id_when_editing(self):
         e = expense_from_fields("2026-09-29", "213", "PEN", "3,8", " food ", "test", expense_id="d3e6d47a")
@@ -27,8 +38,7 @@ class GuiHelpersTest(unittest.TestCase):
     def test_month_choices_maps_labels_to_keys(self):
         import tkinter as tk
         from tkinter import ttk
-        root = tk.Tk()
-        root.withdraw()
+        root = hidden_root(self)
         try:
             key = tk.StringVar(root, value="2026-09")
             box = ttk.Combobox(root, state="readonly")
@@ -48,8 +58,7 @@ class GuiHelpersTest(unittest.TestCase):
         import tkinter as tk
         from tkinter import ttk
         self.assertEqual(month_label("2026"), "2026 · whole year")
-        root = tk.Tk()
-        root.withdraw()
+        root = hidden_root(self)
         try:
             key = tk.StringVar(root, value="2026-09")
             choices = MonthChoices(ttk.Combobox(root), key)
@@ -61,10 +70,8 @@ class GuiHelpersTest(unittest.TestCase):
             root.destroy()
 
     def test_sortable_columns(self):
-        import tkinter as tk
         from tkinter import ttk
-        root = tk.Tk()
-        root.withdraw()
+        root = hidden_root(self)
         try:
             tree = ttk.Treeview(root, columns=("amount", "payment"))
             calls = []
@@ -87,8 +94,7 @@ class GuiHelpersTest(unittest.TestCase):
 
     def test_tag_field_menu(self):
         import tkinter as tk
-        root = tk.Tk()
-        root.withdraw()
+        root = hidden_root(self)
         try:
             var = tk.StringVar(root, value="Lima Trip")
             field = TagField(root, var, lambda: ["cusco-trip", "work", "lima-trip"])

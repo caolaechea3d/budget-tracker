@@ -1,78 +1,131 @@
-# Budget Tracker
+# 💰 Budget Tracker
 
-A personal budget tracker for PEN (soles) and USD, with separate users. Everything is saved
-locally in the `data/` folder:
+[![Tests](https://github.com/caolaechea3d/budget-tracker/actions/workflows/tests.yml/badge.svg)](https://github.com/caolaechea3d/budget-tracker/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+A personal budget app for Windows that tracks **expenses, income, debts and budgets** in Peruvian
+soles (PEN) and US dollars (USD). Several people can use it on the same computer, each with their
+own data — and everything stays on your computer.
+
+![Expenses tab](docs/screenshots/expenses.png)
+
+## Download
+
+Get the latest version from [**Releases**](https://github.com/caolaechea3d/budget-tracker/releases/latest)
+(Windows 10/11, 64-bit, no Python needed):
+
+- **`…-setup.exe`** — installer with a Start-menu shortcut and uninstaller (no admin rights needed).
+- **`…-portable.zip`** — unzip anywhere and run `Budget Tracker.exe`; your data stays in that folder.
+
+The app isn't code-signed, so Windows may show "Windows protected your PC" the first time:
+click **More info → Run anyway**.
+
+## Features
+
+- **Two currencies done right** — enter amounts in PEN or USD. Every record keeps the exchange rate
+  of the day it was entered, so switching the whole app between PEN and USD never changes history.
+- **Categories with subcategories and icons** — e.g. *Transport › Taxi*, with colorful emoji icons;
+  fully editable, plus payment methods (cash, cards, Yape, Plin…) and tags (`#cusco-trip`).
+- **Budgets** — a monthly limit per category, with progress bars that turn orange at 80% and red
+  when you go over.
+- **Debts** — money you owe and money others owe you, with optional deadlines or monthly
+  installments ("cuotas"), payment history, and reminders when something is due or overdue.
+- **Recurring expenses** — rent, subscriptions and bills, offered for adding each month.
+- **Charts** — spending by category and income vs. expenses over the last 12 months.
+- **Bank statement import** — CSV files with `;` separators, `1.234,56` amounts and `DD/MM/YYYY`
+  dates; duplicates are skipped.
+- **Everyday comforts** — undo/redo (Ctrl+Z / Ctrl+Y), search across all months, sortable
+  columns, filters, a calendar date picker, receipts attached to expenses, CSV export.
+- **Several users** — a start screen to pick who's using the app; each user has separate data,
+  receipts and backups.
+- **Safe storage** — atomic saves (a crash never leaves a half-written file) and an automatic
+  daily backup per user.
+
+| | |
+|---|---|
+| ![Start screen](docs/screenshots/start.png) | ![Debts](docs/screenshots/debts.png) |
+| ![Charts](docs/screenshots/charts.png) | ![Budgets](docs/screenshots/budgets.png) |
+
+*Screenshots use made-up demo data (`tools/demo_data.py`).*
+
+## How it's built
+
+Python 3 with Tkinter for the interface and Pillow for the color icons; data is plain JSON files.
 
 ```
-data/users.json                  the list of users (name, type, icon) and who was used last
-data/users/<id>/expenses.json    that user's expenses, income, budgets, recurring, categories…
-data/users/<id>/receipts/        that user's receipts
-data/users/<id>/backups/         that user's automatic daily backups (last 30 kept)
-data/users/_deleted/             data of deleted users (moved here, never erased)
+expense_tracker/
+  storage.py      data model (expenses, income, budgets, recurring) and the JSON store
+  debts.py        debts, installment schedules and payments
+  undo.py         undo/redo history
+  reports.py      totals, comparisons, budget status, search
+  importer.py     bank-statement CSV import
+  users.py        users, each with their own data folder
+  paths.py        where data lives (from source, portable, or installed)
+  cli.py          command-line interface
+  gui/            the window: start screen, dialogs, widgets, charts
+  gui/tabs/       one module per tab (expenses, income, debts, charts, budgets, recurring)
+tests/            unit tests (python -m unittest)
+build.py          builds the Windows app with PyInstaller (+ Inno Setup installer)
 ```
 
-On the first run, an existing `data/expenses.json` (from before users existed) is moved into
-the **Default User**, with a safety copy in its backups. The app name is set in
-`expense_tracker/__init__.py` (`APP_NAME`).
+Some design decisions:
 
-## Users
+- **Exchange rate per record.** The PEN/USD rate changes every day, so each expense, income and
+  debt stores the rate it was entered with. Converting with today's rate would silently rewrite
+  past months.
+- **Money as `Decimal`**, never floats, so amounts like 0.10 + 0.20 are exact.
+- **Undo by snapshots.** Before each undoable change the whole document is kept in memory; undo
+  writes it back. Each step remembers a fingerprint of the data, so if something that isn't
+  undoable changed it in between, undo refuses instead of overwriting that change.
+- **One write per change.** Multi-part changes (e.g. a debt payment that also creates an expense)
+  are applied to the document in a single atomic save — all or nothing.
+- **Tabs share one load.** `refresh()` reads the data once and hands the same snapshot to every
+  tab, so all tabs always agree.
 
-The window opens on a start screen: pick a user card, or "New user" (name, type such as
-Personal/Work/Family, and an icon & color). The "⋯" on a card edits or deletes that user.
-Inside, the header shows who's active and a "Switch user" button (also in the File menu).
+## About this project
 
-## Setup
+This app was built with AI assistance: the code was written with
+[Claude Code](https://claude.com/claude-code) as a pair programmer, while I decided what to build
+and how it should behave, and tested it as it grew. Commits note the AI co-author.
 
-Python 3.10+ is required. [Pillow](https://pypi.org/project/pillow/) is optional and draws the
-colorful category icons; without it the app shows plain emoji instead.
+## Running from source
+
+Requires Python 3 (developed and tested with 3.14) on Windows.
 
 ```
 python -m pip install -r requirements.txt
-```
-
-## Desktop window
-
-```
 python main.py
 ```
 
-- **Expenses** – quick-add form, list with icons, and a *By category* panel with subcategories,
-  change vs the previous month and budget usage. Double-click (or right-click) an expense to edit,
-  duplicate, attach a receipt or delete it. "More…" opens the full form.
-- **Income** – salary, freelance, etc. The header shows income, expenses and balance for the month.
-- **Debts** – money you owe and money others owe you: who/what (person, bank, credit card…), what
-  for, amount, an optional deadline and/or monthly installments ("cuotas"), and a payment history.
-  Shows paid/remaining with a progress bar, the next payment due, and status (overdue, due soon,
-  on track, no deadline, paid off). A payment can also be added as an expense ("Debt payments")
-  or, for money owed to you, as income ("Debt repayment"). You get a reminder when the app opens
-  if something is overdue or due within 7 days.
-- **Charts** – spending by category (donut) and income vs expenses for the last 12 months.
-- **Budgets** – monthly limit per category with progress bars (orange from 80%, red when over).
-- **Recurring** – rent, subscriptions and bills. When one is due, the app asks to add it.
-- **Period** – the picker at the top chooses a month ("September 2026"), a whole year
-  ("2026 · whole year") or all months; ◀ ▶ step by month or by year.
-- **Sorting** – click any column heading (category, date, amount, payment…) to sort; click
-  again to reverse.
-- **Filters** – category, payment method and tag (e.g. everything tagged `#cusco-trip`).
-- **Undo / redo** (Ctrl+Z / Ctrl+Y, the Edit menu, or the button in the status bar) for adding,
-  editing and deleting expenses and income, imports and added recurring expenses — several steps
-  back, receipts included. The history lasts until you switch user or close the app. Settings
-  changes (budgets, category manager, recurring templates) aren't undoable.
-- **Search** (Ctrl+F) looks through all months by description, category, payment method or tag
-  (`#tag` matches tags only).
-- **File menu** – import a bank statement CSV (column mapping, `;` or `,`, `1.234,56` amounts,
-  duplicates skipped), export CSV, back up now, open the data folder.
-- **Settings menu** – categories & subcategories with icons and colors, payment methods,
-  income sources. Renaming updates existing records.
+[Pillow](https://pypi.org/project/pillow/) draws the color icons; without it the app still works
+with plain emoji. To try the app with demo data instead of your own:
 
-## Currencies
+```
+python tools/demo_data.py demo-data
+set BUDGET_TRACKER_DATA=demo-data
+python main.py
+```
 
-Amounts are entered in PEN by default, or in USD. Every expense and income stores its own exchange
-rate (soles per 1 US dollar) from the moment it was entered, so later rate changes never affect
-older records. The rate field remembers the last rate you used. Use "Show in" to see everything
-in PEN or USD.
+### Where data is stored
 
-## Command line
+| How you run it | Data folder |
+|---|---|
+| From source (`python main.py`) | `data/` in the project folder |
+| Portable zip | `data/` next to `Budget Tracker.exe` |
+| Installed | `%APPDATA%\Budget Tracker\data` (kept on uninstall) |
+
+The `BUDGET_TRACKER_DATA` environment variable overrides all of these. Inside it:
+
+```
+users.json                  the list of users and who was used last
+users/<id>/expenses.json    that user's expenses, income, debts, budgets, recurring, categories…
+users/<id>/receipts/        that user's receipts
+users/<id>/backups/         automatic daily backups (last 30 kept)
+users/_deleted/             data of deleted users (moved here, never erased)
+logs/errors.log             details of unexpected errors
+```
+
+### Command line
 
 ```
 python -m expense_tracker                                   # interactive menu
@@ -83,39 +136,40 @@ python -m expense_tracker list --month 2026-09 --in USD
 python -m expense_tracker summary --month 2026-09
 python -m expense_tracker income add 5200 salary
 python -m expense_tracker budget set transport 250
-python -m expense_tracker budget list
+python -m expense_tracker debts --in USD                    # open debts; --all includes paid-off ones
 python -m expense_tracker export expenses.csv --month 2026-09
 python -m expense_tracker backup
-python -m expense_tracker debts --in USD                    # open debts; --all includes paid-off ones
 python -m expense_tracker users list
-python -m expense_tracker users add "Oficina" --type Work
 python -m expense_tracker --user Oficina list               # any command, for a specific user
 ```
 
-Commands use the last user you opened unless you pass `--user NAME`. To work on a single file
-directly instead, use `--file path/to/file.json` or the `EXPENSES_FILE` environment variable.
+Commands use the last user opened in the app unless you pass `--user NAME`.
 
-## Building the Windows app (for testers)
+### Tests
+
+```
+python -m unittest -v
+```
+
+They also run on GitHub for every push (see the badge above).
+
+### Building the Windows app
 
 ```
 python -m pip install -r requirements-dev.txt
 python build.py
 ```
 
-This creates, in `dist/`:
+Creates `dist/BudgetTracker-<version>-portable.zip`, and `dist/BudgetTracker-<version>-setup.exe`
+if [Inno Setup 6](https://jrsoftware.org/isinfo.php) is installed. The version is `__version__` in
+`expense_tracker/__init__.py`.
 
-- `BudgetTracker-<version>-portable.zip` — unzip anywhere and run `Budget Tracker.exe`; no Python
-  needed. Data is kept in a `data` folder next to the .exe (because of the `portable.txt` file).
-- `BudgetTracker-<version>-setup.exe` — a normal installer with Start-menu shortcut and uninstaller,
-  built only if [Inno Setup 6](https://jrsoftware.org/isinfo.php) is installed. Installs without
-  admin rights; data goes to `%APPDATA%\Budget Tracker\data` and is kept on uninstall.
+**Publishing a release:** bump `__version__`, commit, then push a matching tag
+(`git tag v0.2.0` and `git push origin v0.2.0`). GitHub builds both files on Windows and publishes
+them as a release (`.github/workflows/release.yml`).
 
-The version number is `__version__` in `expense_tracker/__init__.py`. Unexpected errors are saved
-to `data/logs/errors.log` in the data folder, so testers can send it. Windows SmartScreen will
-warn about an unknown publisher (the app isn't code-signed): "More info" → "Run anyway".
+To refresh the README screenshots: `python tools/screenshots.py` (Windows; uses demo data).
 
-## Tests
+## License
 
-```
-python -m unittest -v
-```
+[MIT](LICENSE)
