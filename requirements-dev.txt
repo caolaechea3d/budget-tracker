@@ -1,0 +1,3 @@
+# Needed only to build the Windows app (python build.py), not to run it.
+-r requirements.txt
+pyinstaller>=6.16

@@ -1,0 +1,28 @@
+Budget Tracker — test version
+=============================
+
+Thanks for trying it out!
+
+STARTING IT
+  Double-click "Budget Tracker.exe".
+
+  The first time, Windows may show a blue "Windows protected your PC" window, because
+  the app isn't signed with a paid certificate. Click "More info", then "Run anyway".
+
+YOUR DATA
+  Everything stays on this computer — nothing is sent anywhere.
+  - Portable version (the .zip): your data is saved in the "data" folder next to
+    Budget Tracker.exe. Keep that folder if you move or update the app.
+  - Installed version: your data is saved in %APPDATA%\Budget Tracker\data
+    (paste that into the File Explorer address bar to open it). Uninstalling keeps it.
+  The start screen shows exactly where your data folder is.
+
+IF SOMETHING GOES WRONG
+  The app shows a message and saves the details in data\logs\errors.log.
+  Please send that file, plus a short note of what you were doing, to whoever gave
+  you the app. Screenshots help too.
+
+THINGS WORTH TRYING
+  - Create your own user on the start screen.
+  - Add a few expenses (PEN or USD), edit one, delete one, then press Ctrl+Z.
+  - Set a budget, add a debt with monthly installments, look at the Charts tab.

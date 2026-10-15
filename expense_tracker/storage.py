@@ -1,8 +1,9 @@
 """Data model and local JSON storage.
 
-Everything lives in one JSON file (default: data/expenses.json) next to two folders:
-  data/receipts/  copies of receipt files attached to expenses
-  data/backups/   an automatic copy of the data file, once per day (last 30 kept)
+Each user's data lives in one JSON file (users/<id>/expenses.json inside the data folder, see
+paths.py) next to two folders:
+  receipts/  copies of receipt files attached to expenses
+  backups/   an automatic copy of the data file, once per day (last 30 kept)
 """
 
 from __future__ import annotations
@@ -26,8 +27,9 @@ from .catalog import (
     default_income_sources,
     default_payment_methods,
 )
+from .paths import data_dir
 
-DEFAULT_DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "expenses.json"
+DEFAULT_DATA_FILE = data_dir() / "expenses.json"  # see paths.py for where data_dir() points
 DATA_VERSION = 3
 BACKUPS_TO_KEEP = 30
 

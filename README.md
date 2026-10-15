@@ -95,6 +95,25 @@ python -m expense_tracker --user Oficina list               # any command, for a
 Commands use the last user you opened unless you pass `--user NAME`. To work on a single file
 directly instead, use `--file path/to/file.json` or the `EXPENSES_FILE` environment variable.
 
+## Building the Windows app (for testers)
+
+```
+python -m pip install -r requirements-dev.txt
+python build.py
+```
+
+This creates, in `dist/`:
+
+- `BudgetTracker-<version>-portable.zip` — unzip anywhere and run `Budget Tracker.exe`; no Python
+  needed. Data is kept in a `data` folder next to the .exe (because of the `portable.txt` file).
+- `BudgetTracker-<version>-setup.exe` — a normal installer with Start-menu shortcut and uninstaller,
+  built only if [Inno Setup 6](https://jrsoftware.org/isinfo.php) is installed. Installs without
+  admin rights; data goes to `%APPDATA%\Budget Tracker\data` and is kept on uninstall.
+
+The version number is `__version__` in `expense_tracker/__init__.py`. Unexpected errors are saved
+to `data/logs/errors.log` in the data folder, so testers can send it. Windows SmartScreen will
+warn about an unknown publisher (the app isn't code-signed): "More info" → "Run anyway".
+
 ## Tests
 
 ```

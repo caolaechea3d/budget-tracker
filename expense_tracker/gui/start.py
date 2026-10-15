@@ -7,10 +7,12 @@ from collections.abc import Callable
 from datetime import date
 from tkinter import messagebox, ttk
 
-from .. import APP_NAME
+from .. import APP_NAME, __version__
+from ..paths import is_portable
 from ..reports import in_month
 from ..storage import format_money, month_key, total_in
 from ..users import USER_TYPES, User, UserRegistry, type_look
+from . import errors
 from .app import ExpenseApp
 from .icons import Icons, enable_dpi_awareness
 from .manage import ask_icon
@@ -109,7 +111,9 @@ class StartScreen(ttk.Frame):
                   style="Muted.TLabel", font=("Segoe UI", 12)).grid(row=2, column=0, pady=(6, 26))
         self.cards = ttk.Frame(self)
         self.cards.grid(row=3, column=0)
-        ttk.Label(self, text=f"Data folder: {registry.data_dir}", style="Muted.TLabel").grid(
+        mode = " · portable" if is_portable() else ""
+        ttk.Label(self, text=f"{APP_NAME} {__version__}{mode}  ·  Data folder: {registry.data_dir}",
+                  style="Muted.TLabel").grid(
             row=4, column=0, pady=(26, 0))
         master.bind("<Return>", self._open_selected)
         self.users_changed()
@@ -217,6 +221,9 @@ class Shell:
         self.registry = registry
         self.icons = Icons(root)
         setup_style(root, self.icons)
+        app_icon = self.icons.get("💰", "#43aa8b", size=64)
+        if app_icon:
+            root.iconphoto(True, app_icon)  # window and taskbar icon
         root.columnconfigure(0, weight=1)
         root.rowconfigure(0, weight=1)
         self.current: tk.Widget | None = None
@@ -243,6 +250,7 @@ class Shell:
 def run(data_dir=None) -> None:
     enable_dpi_awareness()
     root = tk.Tk()
+    errors.install(root)
     root.geometry("1200x760")
     root.minsize(900, 600)
     registry = UserRegistry(data_dir)

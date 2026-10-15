@@ -9,3 +9,8 @@ data/
 
 # Editor settings (PyCharm)
 .idea/
+
+# Build output (python build.py)
+build/
+dist/
+assets/app.ico
