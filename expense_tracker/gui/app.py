@@ -16,6 +16,8 @@ from tkinter import filedialog, messagebox, ttk
 
 from .. import APP_NAME
 from ..catalog import PALETTE, Category, Item, category_look, find_category, find_item
+from ..debts import DUE_SOON_DAYS, load_debts
+from ..debts import summarize as summarize_debts
 from ..reports import balance, is_year, recent_tags
 from ..storage import (
     CURRENCIES,
@@ -36,7 +38,16 @@ from .forms import DueRecurringDialog, open_file
 from .icons import Icons
 from .import_dialog import ImportDialog
 from .manage import CategoriesDialog, ItemsDialog
-from .tabs import INCOME_COLOR, BudgetsTab, ChartsTab, ExpensesTab, IncomeTab, PageData, RecurringTab
+from .tabs import (
+    INCOME_COLOR,
+    BudgetsTab,
+    ChartsTab,
+    DebtsTab,
+    ExpensesTab,
+    IncomeTab,
+    PageData,
+    RecurringTab,
+)
 from .widgets import MonthChoices, setup_style
 
 ALL = "All months"
@@ -78,10 +89,12 @@ class ExpenseApp(ttk.Frame):
         self.notebook.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 4))
         self.expenses_tab = ExpensesTab(self)
         self.income_tab = IncomeTab(self)
+        self.debts_tab = DebtsTab(self)
         self.charts_tab = ChartsTab(self)
         self.budgets_tab = BudgetsTab(self)
         self.recurring_tab = RecurringTab(self)
-        self.tabs = [self.expenses_tab, self.income_tab, self.charts_tab, self.budgets_tab, self.recurring_tab]
+        self.tabs = [self.expenses_tab, self.income_tab, self.debts_tab, self.charts_tab, self.budgets_tab,
+                     self.recurring_tab]
         self._build_status_bar()
 
         self.search_var.trace_add("write", lambda *_: self.refresh())
@@ -92,6 +105,7 @@ class ExpenseApp(ttk.Frame):
                                                self.expenses_tab.focus_quick_add()))
         self.refresh()
         self.expenses_tab.focus_quick_add()
+        self.after(400, self.remind_debts)
         self.after(500, self.check_recurring)
 
     # ---------- catalog helpers (used by pickers and dialogs) ----------
@@ -371,6 +385,23 @@ class ExpenseApp(ttk.Frame):
         self.notebook.select(self.income_tab)
         self.refresh(select_income=income.id)
 
+    def debt_saved(self, debt_id: str, message: str) -> None:
+        """After a debt or payment change: show the Debts tab with that debt selected."""
+        self.reload_catalog()  # recording a payment may have added "Debt payments" / "Debt repayment"
+        self.set_status(message)
+        self.notebook.select(self.debts_tab)
+        self.refresh(select_debt=debt_id)
+
+    def remind_debts(self) -> None:
+        """On opening: a status-bar note when debts are overdue or due within a week."""
+        if not self.winfo_exists():
+            return
+        summary = summarize_debts(self.debts_tab.debts, self.show_in_var.get())
+        parts = [f"{summary.overdue} overdue"] if summary.overdue else []
+        parts += [f"{summary.due_soon} due within {DUE_SOON_DAYS} days"] if summary.due_soon else []
+        if parts:
+            self.set_status(f"⚠ Debts: {' and '.join(parts)} — see the Debts tab.")
+
     def budgets_changed(self, category: str, is_set: bool) -> None:
         self.set_status(f"Budget for {category} {'saved' if is_set else 'removed'}.")
         self.refresh()
@@ -444,12 +475,15 @@ class ExpenseApp(ttk.Frame):
 
     # ---------- refresh everything ----------
 
-    def refresh(self, select_expense: str | None = None, select_income: str | None = None) -> None:
+    def refresh(
+        self, select_expense: str | None = None, select_income: str | None = None, select_debt: str | None = None
+    ) -> None:
         """Load the data once, update the header, and ask every tab to redraw."""
         try:
             expenses = self.store.load()
             incomes = self.store.load_incomes()
             budgets = self.store.budgets()
+            debts = load_debts(self.store)
         except (ValueError, KeyError, OSError) as exc:
             messagebox.showerror("Could not read data file", f"{self.store.path}\n\n{exc}")
             return
@@ -458,6 +492,7 @@ class ExpenseApp(ttk.Frame):
             expenses=expenses, incomes=incomes, budgets=budgets,
             show_in=self.show_in_var.get(), period=self.selected_month(), focus_month=self.focus_month(),
             select_expense=select_expense, select_income=select_income,
+            debts=debts, select_debt=select_debt,
         )
 
         earned, spent, net = balance(expenses, incomes, data.period, data.show_in)

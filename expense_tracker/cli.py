@@ -29,6 +29,8 @@ from .storage import (
     summarize_by_category,
     total_in,
 )
+from .debts import DIRECTION_LABELS, STATUS_LABELS, STATUS_ORDER, load_debts
+from .debts import summarize as summarize_debts
 from .users import USER_TYPES, UserRegistry
 
 NO_RATE_HELP = "No exchange rate saved yet; give one (PEN per 1 USD), e.g. 3.75"
@@ -212,6 +214,22 @@ def cmd_backup(store: ExpenseStore, args: argparse.Namespace) -> None:
     print(f"Backup saved: {store.backup_now()}")
 
 
+def cmd_debts(store: ExpenseStore, args: argparse.Namespace) -> None:
+    debts = [d for d in load_debts(store) if args.all or not d.is_closed]
+    if not debts:
+        print("No open debts." + ("" if args.all else " (Use --all to include paid-off ones.)"))
+        return
+    summary = summarize_debts(debts, args.show_in)
+    print(f"I owe {format_money(summary.i_owe, args.show_in)} · owed to me {format_money(summary.owed_to_me, args.show_in)}"
+          f" · {summary.overdue} overdue · {summary.due_soon} due soon")
+    print("-" * 104)
+    for d in sorted(debts, key=lambda d: (STATUS_ORDER.index(d.status()), d.counterparty.lower())):
+        due = d.next_due()
+        due_text = f"{due[0].isoformat()} {format_money(due[1], d.currency)}" if due else ""
+        print(f"{DIRECTION_LABELS[d.direction]:<8}{d.counterparty[:22]:<23}{format_money(d.remaining, d.currency):>15} "
+              f"left of {format_money(d.amount, d.currency):<15}{STATUS_LABELS[d.status()]:<12}{due_text}")
+
+
 # ---------- interactive menu ----------
 
 def prompt(label: str, default: str = "") -> str:
@@ -382,6 +400,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("backup", help="Save a copy of this user's data in their backups folder")
     p.set_defaults(func=cmd_backup)
+
+    p = sub.add_parser("debts", help="List debts (what you owe and what you're owed)")
+    p.add_argument("--all", action="store_true", help="Include paid-off debts")
+    p.add_argument("--in", dest="show_in", **show_in)
+    p.set_defaults(func=cmd_debts)
 
     p = sub.add_parser("users", help="List or add users (each has separate data)")
     users = p.add_subparsers(dest="users_command", required=True)

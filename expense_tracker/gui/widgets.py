@@ -302,14 +302,23 @@ class DateField(ttk.Frame):
         self.entry = ttk.Entry(self, textvariable=variable, width=width, cursor="hand2")
         self.entry.pack(side="left", fill="x", expand=True)
         image = icons.get("📅", "#8d99ae", badge=False) if icons else None
-        ttk.Button(self, image=image or "", text="" if image else "📅", width=0 if image else 3,
-                   command=self.open, style="Icon.TButton", takefocus=False).pack(side="left", padx=(2, 0))
+        self.button = ttk.Button(self, image=image or "", text="" if image else "📅", width=0 if image else 3,
+                                 command=self.open, style="Icon.TButton", takefocus=False)
+        self.button.pack(side="left", padx=(2, 0))
         self.entry.bind("<Button-1>", lambda _e: self.after_idle(self.open))
         self.entry.bind("<Alt-Down>", lambda _e: self.open())
         self._popup: CalendarPopup | None = None
+        self.enabled = True
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Grey out the field (e.g. an optional deadline that's switched off)."""
+        self.enabled = enabled
+        state = ["!disabled"] if enabled else ["disabled"]
+        self.entry.state(state)
+        self.button.state(state)
 
     def open(self) -> None:
-        if self._popup is not None and self._popup.winfo_exists():
+        if not self.enabled or (self._popup is not None and self._popup.winfo_exists()):
             return
         try:
             current = date.fromisoformat(self.variable.get().strip())

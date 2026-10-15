@@ -40,6 +40,12 @@ python main.py
   change vs the previous month and budget usage. Double-click (or right-click) an expense to edit,
   duplicate, attach a receipt or delete it. "More…" opens the full form.
 - **Income** – salary, freelance, etc. The header shows income, expenses and balance for the month.
+- **Debts** – money you owe and money others owe you: who/what (person, bank, credit card…), what
+  for, amount, an optional deadline and/or monthly installments ("cuotas"), and a payment history.
+  Shows paid/remaining with a progress bar, the next payment due, and status (overdue, due soon,
+  on track, no deadline, paid off). A payment can also be added as an expense ("Debt payments")
+  or, for money owed to you, as income ("Debt repayment"). You get a reminder when the app opens
+  if something is overdue or due within 7 days.
 - **Charts** – spending by category (donut) and income vs expenses for the last 12 months.
 - **Budgets** – monthly limit per category with progress bars (orange from 80%, red when over).
 - **Recurring** – rent, subscriptions and bills. When one is due, the app asks to add it.
@@ -80,6 +86,7 @@ python -m expense_tracker budget set transport 250
 python -m expense_tracker budget list
 python -m expense_tracker export expenses.csv --month 2026-09
 python -m expense_tracker backup
+python -m expense_tracker debts --in USD                    # open debts; --all includes paid-off ones
 python -m expense_tracker users list
 python -m expense_tracker users add "Oficina" --type Work
 python -m expense_tracker --user Oficina list               # any command, for a specific user

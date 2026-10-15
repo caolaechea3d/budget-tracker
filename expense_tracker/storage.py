@@ -13,6 +13,7 @@ import os
 import shutil
 import tempfile
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -402,6 +403,12 @@ class ExpenseStore:
     def snapshot(self) -> dict:
         """A copy of everything in the data file, as it is right now."""
         return self._read()
+
+    def update_document(self, change: Callable[[dict], None]) -> None:
+        """Apply `change` to the whole document and save it in a single write (all or nothing)."""
+        doc = self._read()
+        change(doc)
+        self._write(doc)
 
     def restore(self, doc: dict) -> None:
         """Put back a snapshot, then bring receipt files in line with it."""

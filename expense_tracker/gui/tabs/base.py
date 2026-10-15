@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from tkinter import ttk
 from typing import TYPE_CHECKING
 
+from ...debts import Debt
 from ...storage import Budget, Expense, Income
 
 if TYPE_CHECKING:
@@ -28,6 +29,8 @@ class PageData:
     focus_month: str  # the single month used by budgets and the 12-month chart
     select_expense: str | None = None  # expense to select after redrawing
     select_income: str | None = None
+    debts: list[Debt] = field(default_factory=list)
+    select_debt: str | None = None
 
 
 class Tab(ttk.Frame):
