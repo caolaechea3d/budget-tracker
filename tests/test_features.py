@@ -132,6 +132,33 @@ class DataTest(StoreTestCase):
         self.store.set_budget("Nothing", None, month="2027-04")  # removing an exception that doesn't exist
         self.assertNotIn("Nothing", self.store.budgets())
 
+    def test_subcategory_budgets(self):
+        from expense_tracker.storage import Budget
+        # Budgets for two cars; Transport itself didn't have a budget yet
+        self.store.set_budget("Transport", D("200"), subcategory="Car 1")
+        self.store.set_budget("Transport", D("150"), subcategory="Car 2")
+        t = self.store.budgets()["Transport"]
+        self.assertEqual((t.amount, t.total_for("2026-10"), list(t.subcategories)), (D("0.00"), D("350.00"), ["Car 1", "Car 2"]))
+        # A budget for the rest of Transport keeps the cars' budgets
+        self.store.set_budget("Transport", D("100"))
+        t = self.store.budgets()["Transport"]
+        self.assertEqual((t.total_for("2026-10"), t.usual_total), (D("450.00"), D("450.00")))
+        # Car 2 isn't used in November
+        self.store.set_budget("Transport", D("0"), month="2026-11", subcategory="car 2")
+        t = self.store.budgets()["Transport"]
+        self.assertEqual((t.total_for("2026-10"), t.total_for("2026-11")), (D("450.00"), D("300.00")))
+        self.assertEqual(Budget.from_dict("Transport", t.to_dict()), t)
+        # Renaming the subcategory renames its budget
+        self.store.rename_subcategory("Transport", "Car 1", "Corolla")
+        self.assertEqual(list(self.store.budgets()["Transport"].subcategories), ["Car 2", "Corolla"])
+        # Removing one car's budget, then the whole category
+        self.store.set_budget("Transport", None, subcategory="Corolla")
+        self.assertEqual(list(self.store.budgets()["Transport"].subcategories), ["Car 2"])
+        self.store.set_budget("Transport", None)
+        self.assertEqual(self.store.budgets(), {})
+        self.store.set_budget("Transport", None, subcategory="Car 2")  # nothing to remove: no error
+        self.assertEqual(self.store.budgets(), {})
+
     def test_budget_amounts_allow_zero(self):
         from expense_tracker.storage import Budget, parse_budget_amount
         self.assertEqual([parse_budget_amount(v) for v in ("0", "0,00", "12,5")], [D("0.00"), D("0.00"), D("12.50")])
@@ -244,6 +271,33 @@ class ReportsTest(unittest.TestCase):
         self.assertEqual((health.limit, health.ratio, health.level, health.fill, health.remaining),
                          (D("0"), None, "ok", 0.0, D("0")))
         self.assertEqual((transport.limit, transport.is_exception, transport.level), (D("50"), False, "warning"))
+
+    def test_subcategory_budget_statuses(self):
+        from expense_tracker.reports import OTHER
+        from expense_tracker.storage import Budget
+        expenses = [
+            Expense(D("170"), "Transport", subcategory="Car 1", date=date(2026, 9, 3), rate=D("3.7")),
+            Expense(D("160"), "Transport", subcategory="Car 2", date=date(2026, 9, 4), rate=D("3.7")),
+            Expense(D("40"), "Transport", subcategory="Taxi", date=date(2026, 9, 5), rate=D("3.7")),
+            Expense(D("25"), "Transport", date=date(2026, 9, 6), rate=D("3.7")),
+        ]
+        budget = Budget("Transport", D("100"), subcategories={
+            "Car 1": Budget("Car 1", D("200")),
+            "Car 2": Budget("Car 2", D("150"), months={"2026-10": D("0")}),
+        })
+        [transport] = budget_statuses(expenses, {"Transport": budget}, "2026-09")
+        self.assertEqual((transport.spent, transport.limit, transport.level), (D("395"), D("450"), "warning"))
+        car1, car2, other = transport.parts
+        self.assertEqual((car1.label, car1.spent, car1.limit, car1.level), ("Car 1", D("170"), D("200"), "warning"))
+        self.assertEqual((car2.label, car2.spent, car2.level, car2.remaining), ("Car 2", D("160"), "over", D("-10")))
+        self.assertEqual((other.subcategory, other.label, other.spent, other.limit), (OTHER, "Other Transport", D("65"), D("100")))
+        # In October Car 2's budget is 0: the total drops and the month is marked as different
+        [october] = budget_statuses([], {"Transport": budget}, "2026-10")
+        self.assertEqual((october.limit, october.usual, october.is_exception), (D("300"), D("450"), True))
+        # Without its own amount and without other spending, there's no "Other" row
+        no_rest = Budget("Transport", D("0"), subcategories={"Car 1": Budget("Car 1", D("200"))})
+        [only_cars] = budget_statuses(expenses[:1], {"Transport": no_rest}, "2026-09")
+        self.assertEqual([p.label for p in only_cars.parts], ["Car 1"])
 
     def test_monthly_totals_and_balance(self):
         months = last_n_months("2026-09", 3)

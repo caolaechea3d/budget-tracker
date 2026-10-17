@@ -487,11 +487,12 @@ class DueRecurringDialog(Dialog):
 # ---------- budget ----------
 
 class BudgetDialog(Dialog):
-    """Set a category's usual monthly budget, or a different amount for one month (0 allowed)."""
+    """Set a budget for a category or one of its subcategories: the usual monthly amount, or a
+    different amount for one month (0 allowed). Subcategory budgets add up to the category's."""
 
     EVERY_MONTH, ONE_MONTH = "every", "one"
 
-    def __init__(self, app: ExpenseApp, category: str = ""):
+    def __init__(self, app: ExpenseApp, category: str = "", subcategory: str | None = None):
         self.app = app
         self.month = app.focus_month()  # the month shown in the Budgets tab
         super().__init__(app, "Monthly budget")
@@ -501,64 +502,103 @@ class BudgetDialog(Dialog):
                 [c.name for c in app.categories], app.expenses_tab.expenses, app.store.budgets(), self.month)
         b = self.body
         self.category_var = tk.StringVar(value=category)
+        self.subcategory_var = tk.StringVar(value=subcategory or "")
         self.amount_var = tk.StringVar()
+        self.amount_label_var = tk.StringVar(value="Budget")
         self.currency_var = tk.StringVar(value=DEFAULT_CURRENCY)
         self.scope_var = tk.StringVar(value=self.EVERY_MONTH)
         self.hint_var = tk.StringVar()
         self.suggested_by_spending = suggested_by_spending
 
         labeled(b, 0, "Category", Picker(
-            b, app.icons, self.category_var, app.category_options, on_change=self._load_existing, width=22,
+            b, app.icons, self.category_var, app.category_options, on_change=self._category_changed, width=22,
         ), sticky="ew")
-        amount = labeled(b, 1, "Budget", ttk.Entry(b, textvariable=self.amount_var, width=14, justify="right"))
-        labeled(b, 2, "Currency", ttk.Combobox(b, textvariable=self.currency_var, values=CURRENCIES, width=7,
+        labeled(b, 1, "Subcategory", Picker(
+            b, app.icons, self.subcategory_var, lambda: app.subcategory_options(self.category_var.get()),
+            none_label="(whole category)", on_change=self._load_existing, width=22,
+        ), sticky="ew")
+        ttk.Label(b, textvariable=self.amount_label_var).grid(row=2, column=0, sticky="w", padx=(0, 10), pady=3)
+        amount = ttk.Entry(b, textvariable=self.amount_var, width=14, justify="right")
+        amount.grid(row=2, column=1, sticky="w", pady=3)
+        labeled(b, 3, "Currency", ttk.Combobox(b, textvariable=self.currency_var, values=CURRENCIES, width=7,
                                                state="readonly"))
         scope = ttk.Frame(b)
         ttk.Radiobutton(scope, text="Every month", value=self.EVERY_MONTH, variable=self.scope_var,
                         command=self._scope_changed).pack(anchor="w")
         ttk.Radiobutton(scope, text=f"Only {month_label(self.month)}", value=self.ONE_MONTH,
                         variable=self.scope_var, command=self._scope_changed).pack(anchor="w")
-        labeled(b, 3, "Applies to", scope)
-        ttk.Label(b, textvariable=self.hint_var, style="Muted.TLabel", justify="left").grid(
-            row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        labeled(b, 4, "Applies to", scope)
+        ttk.Label(b, textvariable=self.hint_var, style="Muted.TLabel", justify="left", wraplength=460).grid(
+            row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
         self._load_existing()
         self.show(amount)
 
     def _budget(self):
+        """The category's budget (with its subcategory budgets), or None."""
         name = self.category_var.get().lower()
         return next((bud for key, bud in self.app.store.budgets().items() if key.lower() == name), None)
 
-    def _load_existing(self) -> None:
-        """Show the category's current budget; open on "Only <month>" if that month has its own amount."""
+    def _target(self):
+        """The budget being edited: the subcategory's, or the category's own."""
         budget = self._budget()
+        sub = self.subcategory_var.get()
+        if budget is None or not sub:
+            return budget
+        return budget.subcategory(sub)
+
+    def _category_changed(self) -> None:
+        self.subcategory_var.set("")
+        self._load_existing()
+
+    def _load_existing(self) -> None:
+        """Show the current budget; open on "Only <month>" if that month has its own amount."""
+        budget, target = self._budget(), self._target()
         if budget:
             self.currency_var.set(budget.currency)
-        self.scope_var.set(self.ONE_MONTH if budget and self.month in budget.months else self.EVERY_MONTH)
+        self.scope_var.set(self.ONE_MONTH if target and self.month in target.months else self.EVERY_MONTH)
         self._scope_changed()
 
     def _scope_changed(self) -> None:
-        budget = self._budget()
+        budget, target = self._budget(), self._target()
+        category, sub = self.category_var.get(), self.subcategory_var.get()
         month = month_label(self.month)
+        # With subcategory budgets, the category's own amount is for the rest of the category.
+        splits = bool(budget and budget.subcategories) and not sub
+        self.amount_label_var.set(f"Budget for other {category}" if splits else "Budget")
         if self.scope_var.get() == self.ONE_MONTH:
-            value = budget.months.get(self.month) if budget else None
+            value = target.months.get(self.month) if target else None
             hint = (f"Use 0 for a month with nothing planned (e.g. a payment that isn't due in {month}).\n"
                     f"Leave it empty to use the usual amount again in {month}.")
         else:
-            value = budget.amount if budget else None
-            hint = "0 is allowed. Leave it empty to remove this budget from every month."
+            value = target.amount if target else None
+            hint = ("0 is allowed. Leave it empty to remove this subcategory's budget." if sub else
+                    "0 is allowed. Leave it empty to remove this budget from every month.")
         self.amount_var.set("" if value is None else f"{value:.2f}")
-        if budget:
-            usual = f"Usually {format_money(budget.amount, budget.currency)} a month"
-            exceptions = len(budget.months)
-            if exceptions:
-                usual += f" · {exceptions} month{'s' * (exceptions != 1)} with a different amount"
-            hint = f"{usual}.\n{hint}"
-        if self.suggested_by_spending:
-            hint = f"Suggested: your biggest spending this month without a budget.\n{hint}"
-        self.hint_var.set(hint)
+        lines = []
+        if target:
+            usual = f"Usually {format_money(target.amount, budget.currency)} a month"
+            if target.months:
+                count = len(target.months)
+                usual += f" · {count} month{'s' * (count != 1)} with a different amount"
+            lines.append(usual + ".")
+        if sub:
+            lines.append(f"It adds up to the {category} budget, with its other subcategory budgets.")
+        elif splits:
+            parts = " + ".join(f"{name} {format_money(b.amount, budget.currency)}"
+                               for name, b in budget.subcategories.items())
+            lines.append(f"This is for everything in {category} outside its subcategory budgets. "
+                         f"{category} in total: {format_money(budget.usual_total, budget.currency)} = {parts} "
+                         f"+ other {format_money(budget.amount, budget.currency)}.")
+        elif self.app.subcategory_options(category):
+            lines.append(f"Tip: pick a subcategory above to give it its own budget inside {category}.")
+        lines.append(hint)
+        if self.suggested_by_spending and not sub:
+            lines.insert(0, "Suggested: your biggest spending this month without a budget.")
+        self.hint_var.set("\n".join(lines))
 
     def on_ok(self) -> bool:
         category = self.category_var.get().strip()
+        sub = self.subcategory_var.get().strip() or None
         one_month = self.scope_var.get() == self.ONE_MONTH
         try:
             if not category:
@@ -566,10 +606,11 @@ class BudgetDialog(Dialog):
             text = self.amount_var.get().strip()
             amount = parse_budget_amount(text) if text else None
             self.app.store.set_budget(category, amount, parse_currency(self.currency_var.get()),
-                                      month=self.month if one_month else None)
+                                      month=self.month if one_month else None, subcategory=sub)
         except ValueError as exc:
             messagebox.showerror("Invalid budget", str(exc), parent=self)
             return False
-        self.app.budgets_changed(category, amount is not None, self.month if one_month else None)
+        name = f"{category} › {sub}" if sub else category
+        self.app.budgets_changed(name, amount is not None, self.month if one_month else None)
         return True
 

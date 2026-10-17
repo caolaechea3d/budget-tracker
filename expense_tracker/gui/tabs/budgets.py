@@ -5,7 +5,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from ...reports import budget_statuses, category_totals, is_year
+from ...reports import OTHER, BudgetStatus, budget_statuses, category_totals, is_year
 from ...storage import DEFAULT_CURRENCY, format_money
 from ..forms import BudgetDialog
 from ..widgets import ScrollableFrame, month_label
@@ -48,28 +48,51 @@ class BudgetsTab(Tab):
             return 1
         row = 0
         for status in statuses:
-            b = status.budget
-            icon, color = self.app.look(b.category)
-            ttk.Label(inner, **self.app.icon_text(icon, color, b.category), compound="left",
-                      style="Bold.TLabel").grid(row=row, column=0, sticky="w", pady=6, padx=(0, 10))
-            bar = tk.Canvas(inner, height=round(14 * self.icons.scale), highlightthickness=0, background="#e5e7eb")
-            bar.grid(row=row, column=2, sticky="ew", padx=(0, 12))
-            bar_color = LEVEL_COLORS[status.level]
-            bar.bind("<Configure>", lambda e, c=bar, r=status.fill, col=bar_color: self._draw_progress(c, r, col))
-            label_style = {"ok": "TLabel", "warning": "Warning.TLabel", "over": "Over.TLabel"}[status.level]
-            details = ttk.Frame(inner)
-            details.grid(row=row, column=3, sticky="w", padx=(0, 10))
-            ttk.Label(details, text=self._status_text(status), style=label_style).pack(anchor="w")
-            if status.is_exception:
-                ttk.Label(details, text=f"{month_label(month)} only · usually "
-                                        f"{format_money(b.amount, b.currency)} a month",
-                          style="Muted.TLabel").pack(anchor="w")
-            ttk.Button(inner, text="Edit", width=6,
-                       command=lambda c=b.category: BudgetDialog(self.app, c)).grid(row=row, column=4)
-            ttk.Button(inner, text="Remove", width=8,
-                       command=lambda c=b.category: self.remove_budget(c)).grid(row=row, column=5, padx=(4, 0))
+            self._row(inner, row, status, month)
             row += 1
+            for part in status.parts:  # subcategory budgets (and "Other <category>") under their category
+                self._row(inner, row, part, month)
+                row += 1
         return row
+
+    def _row(self, inner: ttk.Frame, row: int, status: BudgetStatus, month: str) -> None:
+        """Icon + name, progress bar, spent/limit text (+ notes), Edit/Remove."""
+        category, sub = status.category, status.subcategory
+        is_part = sub is not None
+        if sub == OTHER:
+            icon, color = self.app.look(category)
+        else:
+            icon, color = self.app.look(category, sub or "")
+        ttk.Label(inner, **self.app.icon_text(icon, color, status.label), compound="left",
+                  style="TLabel" if is_part else "Bold.TLabel").grid(
+            row=row, column=0, sticky="w", pady=(2, 2) if is_part else (8, 2), padx=(28 if is_part else 0, 10))
+        height = round((10 if is_part else 14) * self.icons.scale)
+        bar = tk.Canvas(inner, height=height, highlightthickness=0, background="#e5e7eb")
+        bar.grid(row=row, column=2, sticky="ew", padx=(0, 12))
+        bar_color = LEVEL_COLORS[status.level]
+        bar.bind("<Configure>", lambda e, c=bar, r=status.fill, col=bar_color: self._draw_progress(c, r, col))
+
+        label_style = {"ok": "TLabel", "warning": "Warning.TLabel", "over": "Over.TLabel"}[status.level]
+        details = ttk.Frame(inner)
+        details.grid(row=row, column=3, sticky="w", padx=(0, 10))
+        ttk.Label(details, text=self._status_text(status), style=label_style).pack(anchor="w")
+        notes = []
+        if status.parts:
+            notes.append("Sum of: " + ", ".join(p.label for p in status.parts))
+        if sub == OTHER:
+            notes.append("Everything not in a subcategory budget")
+        if status.is_exception:
+            differs = "differs" if status.parts else "only"
+            notes.append(f"{month_label(month)} {differs} · usually {format_money(status.usual, status.currency)} a month")
+        for note in notes:
+            ttk.Label(details, text=note, style="Muted.TLabel").pack(anchor="w")
+
+        edit_sub = None if sub in (None, OTHER) else sub  # "Other <category>" is the category's own amount
+        ttk.Button(inner, text="Edit", width=6,
+                   command=lambda: BudgetDialog(self.app, category, edit_sub)).grid(row=row, column=4)
+        if sub != OTHER:
+            ttk.Button(inner, text="Remove", width=8,
+                       command=lambda: self.remove_budget(category, edit_sub)).grid(row=row, column=5, padx=(4, 0))
 
     def _unbudgeted_rows(self, inner: ttk.Frame, data: PageData, month: str, row: int) -> None:
         """Categories with spending this month but no budget, each with a 'Set budget' button."""
@@ -92,8 +115,8 @@ class BudgetsTab(Tab):
             row += 1
 
     @staticmethod
-    def _status_text(status) -> str:
-        currency = status.budget.currency
+    def _status_text(status: BudgetStatus) -> str:
+        currency = status.currency
         spent, limit = format_money(status.spent, currency), format_money(status.limit, currency)
         if status.ratio is None:  # a 0 budget this month
             text = (f"Nothing planned this month (budget {limit})" if status.spent == 0
@@ -114,9 +137,17 @@ class BudgetsTab(Tab):
         if ratio > 1:
             canvas.create_line(width - 1, 0, width - 1, height, fill="#7f1d1d", width=2)
 
-    def remove_budget(self, category: str) -> None:
-        if messagebox.askyesno("Remove budget", f"Remove the budget for {category}?\n\n"
-                                                "This removes it for every month, including any month with "
-                                                "its own amount. To change just one month, use Edit."):
-            self.app.store.set_budget(category, None)
-            self.app.budgets_changed(category, False)
+    def remove_budget(self, category: str, subcategory: str | None = None) -> None:
+        if subcategory:
+            name = f"{category} › {subcategory}"
+            detail = "It's removed for every month; the rest of the category's budget stays."
+        else:
+            name = category
+            budget = next((b for key, b in self.app.store.budgets().items() if key.lower() == category.lower()), None)
+            subs = list(budget.subcategories) if budget else []
+            detail = ("This removes it for every month, including any month with its own amount"
+                      + (f" and the subcategory budgets ({', '.join(subs)})" if subs else "") + ".")
+        if messagebox.askyesno("Remove budget", f"Remove the budget for {name}?\n\n{detail}\n"
+                                                "To change just one month, use Edit."):
+            self.app.store.set_budget(category, None, subcategory=subcategory)
+            self.app.budgets_changed(name, False)

@@ -26,8 +26,9 @@ click **More info → Run anyway**.
   of the day it was entered, so switching the whole app between PEN and USD never changes history.
 - **Categories with subcategories and icons** — e.g. *Transport › Taxi*, with colorful emoji icons;
   fully editable, plus payment methods (cash, cards, Yape, Plin…) and tags (`#cusco-trip`).
-- **Budgets** — a monthly limit per category, with progress bars that turn orange at 80% and red
-  when you go over.
+- **Budgets** — a monthly limit per category, optionally split by subcategory (e.g. *Transport ›
+  Car 1* and *Car 2*, adding up to Transport's total), with a different amount for specific months
+  when needed (0 allowed). Progress bars turn orange at 80% and red when you go over.
 - **Debts** — money you owe and money others owe you, with optional deadlines or monthly
   installments ("cuotas"), payment history, and reminders when something is due or overdue.
 - **Recurring expenses** — rent, subscriptions and bills, offered for adding each month.

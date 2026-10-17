@@ -185,9 +185,10 @@ class ExpensesTab(Tab):
                                  ("budget", "Budget", 54)):
             self.summary.heading(col, text=text, anchor="e")
             self.summary.column(col, width=width, anchor="e", stretch=False)
+        # Tags configured later win when a row has several: budget warnings beat the grey of subcategory rows.
+        self.summary.tag_configure("sub", foreground="#4b5563")
         self.summary.tag_configure("over", foreground="#c0392b")
         self.summary.tag_configure("warning", foreground="#b35c00")
-        self.summary.tag_configure("sub", foreground="#4b5563")
         self.summary.grid(row=0, column=0, sticky="nsew")
         return right
 
@@ -278,26 +279,34 @@ class ExpensesTab(Tab):
             icon, color = self.app.look(category)
             now, before = comparison.get(category, (amount, Decimal("0")))
             status = statuses.get(category.lower())
-            if status is None:
-                budget_text = ""
-            elif status.ratio is None:  # a 0 budget this month
-                budget_text = "over" if status.spent > 0 else "—"
-            else:
-                budget_text = f"{status.ratio * 100:.0f}%"
             iid = f"cat:{category}"
             self.summary.insert("", "end", iid=iid, open=iid in open_rows, **self.app.icon_text(icon, color, category),
                                 tags=(status.level,) if status and status.level != "ok" else (),
                                 values=(format_money(amount, show_in), f"{amount / grand * 100:.1f}" if grand else "",
                                         format_change(change_pct(now, before), new=bool(period) and before == 0),
-                                        budget_text))
+                                        self._budget_text(status)))
+            # Subcategory budgets, so each subcategory row can show its own usage
+            parts = {p.subcategory.lower(): p for p in status.parts if p.subcategory} if status else {}
             subs = by_subcategory(period_expenses, category, show_in)
             if len(subs) > 1 or (len(subs) == 1 and "" not in subs):
                 for sub, value in subs.items():
                     sub_icon, sub_color = self.app.look(category, sub) if sub else ("▫", color)
-                    self.summary.insert(iid, "end", tags=("sub",),
+                    part = parts.get(sub.lower()) if sub else None
+                    tags = ("sub", part.level) if part and part.level != "ok" else ("sub",)
+                    self.summary.insert(iid, "end", tags=tags,
                                         **self.app.icon_text(sub_icon, sub_color, sub or "(no subcategory)"),
                                         values=(format_money(value, show_in),
-                                                f"{value / grand * 100:.1f}" if grand else "", "", ""))
+                                                f"{value / grand * 100:.1f}" if grand else "", "",
+                                                self._budget_text(part)))
+
+    @staticmethod
+    def _budget_text(status) -> str:
+        """The 'Budget' column: share of the budget used this month."""
+        if status is None:
+            return ""
+        if status.ratio is None:  # a 0 budget this month
+            return "over" if status.spent > 0 else "—"
+        return f"{status.ratio * 100:.0f}%"
 
     # ---------- adding ----------
 

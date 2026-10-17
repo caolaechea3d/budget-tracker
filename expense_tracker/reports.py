@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 from .storage import Budget, Expense, Income, add_months, month_key, month_range
@@ -88,21 +88,36 @@ def last_n_months(end_month: str, n: int = 12) -> list[str]:
     return month_range(add_months(end_month, -(n - 1)), end_month)
 
 
+OTHER = ""  # BudgetStatus.subcategory for the rest of a category, outside its subcategory budgets
+
+
 @dataclass
 class BudgetStatus:
-    budget: Budget
+    """Spending vs budget in one month, for a whole category or one part of it."""
+
+    budget: Budget  # the category's budget
     spent: Decimal
     missing_rate: int  # expenses that couldn't be converted into the budget's currency
     month: str = ""
+    subcategory: str | None = None  # None: the whole category; a name: that subcategory; OTHER: the rest
+    limit: Decimal = ZERO  # the budget for this month
+    usual: Decimal = ZERO  # the budget in a normal month (for "usually …" notes)
+    is_exception: bool = False  # this month has a different amount than usual
+    parts: list[BudgetStatus] = field(default_factory=list)  # a category's subcategory rows (+ the rest)
 
     @property
-    def limit(self) -> Decimal:
-        """The budget for this month: the usual amount, or this month's exception."""
-        return self.budget.amount_for(self.month)
+    def category(self) -> str:
+        return self.budget.category
 
     @property
-    def is_exception(self) -> bool:
-        return self.month in self.budget.months
+    def currency(self) -> str:
+        return self.budget.currency
+
+    @property
+    def label(self) -> str:
+        if self.subcategory is None:
+            return self.category
+        return f"Other {self.category}" if self.subcategory == OTHER else self.subcategory
 
     @property
     def ratio(self) -> Decimal | None:
@@ -131,19 +146,41 @@ class BudgetStatus:
 
 
 def budget_statuses(expenses: list[Expense], budgets: dict[str, Budget], month: str) -> list[BudgetStatus]:
-    """Spending vs budget for each budgeted category in `month`, fullest first."""
+    """Spending vs budget for each budgeted category in `month`, fullest first.
+
+    A category with subcategory budgets gets `parts`: one per subcategory budget, plus "Other
+    <category>" for the rest of its spending (when it has spending or a budget of its own).
+    """
     statuses = []
     month_expenses = in_month(expenses, month)
     for budget in budgets.values():
-        spent, missing = ZERO, 0
+        total, missing = ZERO, 0
+        by_subcategory: dict[str, Decimal] = {}
         for e in month_expenses:
-            if e.category.lower() == budget.category.lower():
-                value = e.amount_in(budget.currency)
-                if value is None:
-                    missing += 1
-                else:
-                    spent += value
-        statuses.append(BudgetStatus(budget, spent, missing, month))
+            if e.category.lower() != budget.category.lower():
+                continue
+            value = e.amount_in(budget.currency)
+            if value is None:
+                missing += 1
+                continue
+            total += value
+            by_subcategory[e.subcategory.lower()] = by_subcategory.get(e.subcategory.lower(), ZERO) + value
+        parts = []
+        if budget.subcategories:
+            covered = ZERO
+            for name, sub in budget.subcategories.items():
+                spent = by_subcategory.get(name.lower(), ZERO)
+                covered += spent
+                parts.append(BudgetStatus(budget, spent, 0, month, name, sub.amount_for(month), sub.amount,
+                                          month in sub.months))
+            rest = total - covered
+            if rest > 0 or budget.amount > 0 or budget.amount_for(month) > 0:
+                parts.append(BudgetStatus(budget, rest, 0, month, OTHER, budget.amount_for(month), budget.amount,
+                                          month in budget.months))
+        is_exception = month in budget.months or any(month in s.months for s in budget.subcategories.values())
+        statuses.append(BudgetStatus(budget, total, missing, month, None, budget.total_for(month),
+                                     budget.usual_total, is_exception, parts))
+
     def fullness(s: BudgetStatus) -> Decimal:
         if s.ratio is not None:
             return s.ratio

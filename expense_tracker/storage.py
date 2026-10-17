@@ -293,26 +293,70 @@ class Budget:
     """Monthly spending limit for one category, with optional different amounts for specific months.
 
     E.g. a mortgage paid every other month: usually S/ 3,000, but S/ 0 in the months it isn't paid.
+
+    A category can also split its budget by subcategory (Transport › Car 1, Transport › Car 2). Then
+    `amount` is for the rest of the category ("Other Transport"), and the category's total is that
+    plus its subcategory budgets.
     """
 
-    category: str
+    category: str  # for a subcategory budget: the subcategory's name
     amount: Decimal  # the usual monthly limit (0 is allowed)
     currency: str = DEFAULT_CURRENCY
     months: dict[str, Decimal] = field(default_factory=dict)  # exceptions: {"2026-11": Decimal("0")}
+    subcategories: dict[str, Budget] = field(default_factory=dict)
 
     def amount_for(self, month: str) -> Decimal:
+        """This budget's own amount in `month` (without its subcategories)."""
         return self.months.get(month, self.amount)
+
+    def total_for(self, month: str) -> Decimal:
+        """The whole category's budget in `month`: its own amount plus its subcategory budgets."""
+        return self.amount_for(month) + sum((s.amount_for(month) for s in self.subcategories.values()), Decimal(0))
+
+    @property
+    def usual_total(self) -> Decimal:
+        return self.amount + sum((s.amount for s in self.subcategories.values()), Decimal(0))
+
+    def subcategory(self, name: str) -> Budget | None:
+        return next((b for key, b in self.subcategories.items() if key.lower() == name.lower()), None)
 
     def to_dict(self) -> dict:
         d = {"amount": str(self.amount), "currency": self.currency}
         if self.months:
             d["months"] = {m: str(v) for m, v in sorted(self.months.items())}
+        if self.subcategories:
+            d["subcategories"] = {name: {k: v for k, v in sub.to_dict().items() if k != "currency"}
+                                  for name, sub in self.subcategories.items()}
         return d
 
     @classmethod
     def from_dict(cls, category: str, d: dict) -> Budget:
-        return cls(category, parse_budget_amount(d["amount"]), parse_currency(d.get("currency")),
-                   {m: parse_budget_amount(v) for m, v in d.get("months", {}).items()})
+        currency = parse_currency(d.get("currency"))
+        return cls(category, parse_budget_amount(d["amount"]), currency,
+                   {m: parse_budget_amount(v) for m, v in d.get("months", {}).items()},
+                   {name: Budget.from_dict(name, {**sub, "currency": currency})
+                    for name, sub in d.get("subcategories", {}).items()})
+
+
+def _budget_with(budget: Budget | None, name: str, amount: Decimal | None, currency: str,
+                 month: str | None) -> Budget | None:
+    """`budget` (or a new one called `name`) with its usual amount (month=None) or one month's amount
+    changed. amount=None removes: the whole budget, or just that month's exception."""
+    if month is None:
+        if amount is None:
+            return None
+        return Budget(name, amount, currency, budget.months if budget else {},
+                      budget.subcategories if budget else {})
+    if budget is None:
+        if amount is None:
+            return None
+        budget = Budget(name, Decimal("0.00"), currency)  # only this month has an amount
+    months = dict(budget.months)
+    if amount is None:
+        months.pop(month, None)
+    else:
+        months[month] = amount
+    return Budget(budget.category, budget.amount, currency, months, budget.subcategories)
 
 
 @dataclass
@@ -608,6 +652,11 @@ class ExpenseStore:
                 if item["category"].lower() == category.lower() and (item.get("subcategory") or "").lower() == old.lower():
                     item["subcategory"] = new
                     changed += section == "expenses"
+        for name, budget in doc.get("budgets", {}).items():  # a budget for this subcategory follows the rename
+            if name.lower() == category.lower():
+                subs = budget.get("subcategories", {})
+                for key in [k for k in subs if k.lower() == old.lower()]:
+                    subs[new] = subs.pop(key)
         self._write(doc)
         return changed
 
@@ -648,34 +697,42 @@ class ExpenseStore:
         return {name: Budget.from_dict(name, d) for name, d in self._read().get("budgets", {}).items()}
 
     def set_budget(
-        self, category: str, amount: Decimal | None, currency: str = DEFAULT_CURRENCY, month: str | None = None
+        self,
+        category: str,
+        amount: Decimal | None,
+        currency: str = DEFAULT_CURRENCY,
+        month: str | None = None,
+        subcategory: str | None = None,
     ) -> None:
-        """Set a category's budget.
+        """Set a category's budget, or one of its subcategories' budgets.
 
-        Without `month`: the usual monthly amount (amount=None removes the whole budget, exceptions
-        included). With `month`: a different amount for that month only (amount=None removes that
-        exception, so the usual amount applies again). The currency applies to the whole budget.
+        Without `month`: the usual monthly amount (amount=None removes the budget; for a category,
+        that includes its month exceptions and subcategory budgets). With `month`: a different
+        amount for that month only (amount=None removes that exception, so the usual amount applies
+        again). The currency applies to the category's whole budget.
+
+        Once a category has subcategory budgets, its own amount covers the rest of the category.
         """
         doc = self._read()
         budgets = doc.setdefault("budgets", {})
         key = next((k for k in budgets if k.lower() == category.lower()), None)
         existing = Budget.from_dict(key, budgets[key]) if key else None
-        if month is None:
-            if amount is None:
-                updated = None
-            else:
-                updated = Budget(category, amount, currency, existing.months if existing else {})
-        else:
-            if existing is None:
+        if subcategory:
+            parent = existing
+            if parent is None:
                 if amount is None:
-                    return  # no budget and no exception to remove
-                existing = Budget(category, Decimal("0.00"), currency)  # only this month has an amount
-            months = dict(existing.months)
-            if amount is None:
-                months.pop(month, None)
-            else:
-                months[month] = amount
-            updated = Budget(existing.category, existing.amount, currency, months)
+                    return  # nothing to remove
+                parent = Budget(category, Decimal("0.00"), currency)  # "Other <category>" starts at 0
+            subs = dict(parent.subcategories)
+            sub_key = next((k for k in subs if k.lower() == subcategory.lower()), None)
+            sub = _budget_with(subs.pop(sub_key) if sub_key else None, subcategory, amount, currency, month)
+            if sub is not None:
+                subs[sub.category] = sub
+            updated = Budget(parent.category, parent.amount, currency, parent.months, subs)
+        else:
+            if existing is None and amount is None:
+                return  # nothing to remove
+            updated = _budget_with(existing, category, amount, currency, month)
         if key:
             del budgets[key]
         if updated is not None:
