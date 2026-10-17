@@ -62,6 +62,14 @@ class DebtModelTest(unittest.TestCase):
         debt = Debt("Bank", D("600"), start_date=date(2026, 9, 2), installments=2, payment_day=15)
         self.assertEqual(debt.schedule(), [date(2026, 9, 15), date(2026, 10, 15)])
 
+    def test_installments_at_month_end(self):
+        # Due on the 31st: shorter months use their last day
+        debt = Debt("Card", D("400"), start_date=date(2027, 1, 15), installments=4, payment_day=31)
+        self.assertEqual(debt.schedule(), [date(2027, 1, 31), date(2027, 2, 28), date(2027, 3, 31), date(2027, 4, 30)])
+        # Started on the last day of a month: the first payment is the following month's end
+        later = Debt("Card", D("200"), start_date=date(2027, 2, 28), installments=2, payment_day=30)
+        self.assertEqual(later.schedule(), [date(2027, 3, 30), date(2027, 4, 30)])
+
     def test_settled_and_progress(self):
         debt = Debt("Ana", D("400"), direction=OWED)
         debt.payments.append(DebtPayment(D("100")))
@@ -71,7 +79,7 @@ class DebtModelTest(unittest.TestCase):
 
     def test_validation(self):
         for kwargs in ({"counterparty": " "}, {"installments": 0, "payment_day": 5},
-                       {"installments": 3, "payment_day": None}, {"installments": 3, "payment_day": 31},
+                       {"installments": 3, "payment_day": None}, {"installments": 3, "payment_day": 32},
                        {"direction": "maybe"},
                        {"start_date": date(2026, 9, 10), "deadline": date(2026, 9, 1)}):
             args = {"counterparty": "Juan", "amount": D("10"), **kwargs}

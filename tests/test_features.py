@@ -109,6 +109,39 @@ class DataTest(StoreTestCase):
         self.store.set_budget("Food", None)
         self.assertEqual(self.store.budgets(), {})
 
+    def test_budget_with_months_that_differ(self):
+        # A mortgage: usually S/ 3,000, but nothing in November
+        self.store.set_budget("Mortgage", D("3000"))
+        self.store.set_budget("Mortgage", D("0"), month="2026-11")
+        b = self.store.budgets()["Mortgage"]
+        self.assertEqual((b.amount_for("2026-10"), b.amount_for("2026-11")), (D("3000.00"), D("0.00")))
+        # Changing the usual amount keeps the exceptions; removing an exception goes back to usual
+        self.store.set_budget("mortgage", D("3200"))
+        b = self.store.budgets()["mortgage"]
+        self.assertEqual((b.amount_for("2026-10"), b.amount_for("2026-11")), (D("3200.00"), D("0.00")))
+        self.store.set_budget("Mortgage", None, month="2026-11")  # keeps the saved spelling ("mortgage")
+        self.assertEqual(self.store.budgets()["mortgage"].months, {})
+        # Removing the budget removes everything
+        self.store.set_budget("Mortgage", D("0"), month="2026-12")
+        self.store.set_budget("Mortgage", None)
+        self.assertEqual(self.store.budgets(), {})
+        # A budget for just one month: every other month is 0
+        self.store.set_budget("Taxes", D("450"), month="2027-04")
+        t = self.store.budgets()["Taxes"]
+        self.assertEqual((t.amount, t.amount_for("2027-04")), (D("0.00"), D("450.00")))
+        self.store.set_budget("Nothing", None, month="2027-04")  # removing an exception that doesn't exist
+        self.assertNotIn("Nothing", self.store.budgets())
+
+    def test_budget_amounts_allow_zero(self):
+        from expense_tracker.storage import Budget, parse_budget_amount
+        self.assertEqual([parse_budget_amount(v) for v in ("0", "0,00", "12,5")], [D("0.00"), D("0.00"), D("12.50")])
+        for bad in ("-1", "abc", ""):
+            with self.assertRaises(ValueError):
+                parse_budget_amount(bad)
+        budget = Budget("Mortgage", D("3000.00"), "PEN", {"2026-11": D("0.00")})
+        self.assertEqual(Budget.from_dict("Mortgage", budget.to_dict()), budget)
+        self.assertNotIn("months", Budget("Food", D("1")).to_dict())  # same file format as before when unused
+
     def test_daily_backup_and_manual_backup(self):
         self.store.add(Expense(D("1"), "Food", rate=D("3.7")))
         self.assertFalse(self.store.backups_dir.exists())  # nothing to back up before the first save
@@ -154,8 +187,22 @@ class RecurringTest(StoreTestCase):
     def test_paused_and_day_validation(self):
         r = RecurringExpense(D("5"), "Other", day=1, start_month="2026-01", active=False)
         self.assertEqual(r.due_months(date(2026, 9, 1)), [])
-        with self.assertRaises(ValueError):
-            RecurringExpense(D("5"), "Other", day=31)
+        for bad_day in (0, 32):
+            with self.assertRaises(ValueError):
+                RecurringExpense(D("5"), "Other", day=bad_day)
+
+    def test_end_of_month_days(self):
+        # Day 31 = the last day of every month; day 30 becomes 28/29 Feb.
+        r = RecurringExpense(D("100"), "Housing", day=31, start_month="2027-01")
+        self.assertEqual([r.occurrence_date(m) for m in ("2027-01", "2027-02", "2027-04", "2028-02")],
+                         [date(2027, 1, 31), date(2027, 2, 28), date(2027, 4, 30), date(2028, 2, 29)])
+        self.assertEqual(RecurringExpense(D("1"), "Other", day=30).occurrence_date("2027-02"), date(2027, 2, 28))
+        # It's due on the last day of a short month, not skipped until the next one
+        r.handled_through = "2027-01"
+        self.assertEqual(r.due_months(date(2027, 2, 27)), [])
+        self.assertEqual(r.due_months(date(2027, 2, 28)), ["2027-02"])
+        self.assertEqual(r.due_months(date(2027, 4, 29)), ["2027-02", "2027-03"])
+        self.assertEqual(r.due_months(date(2027, 4, 30)), ["2027-02", "2027-03", "2027-04"])
 
 
 class ReportsTest(unittest.TestCase):
@@ -182,6 +229,22 @@ class ReportsTest(unittest.TestCase):
         self.assertEqual((statuses["Food"].spent, statuses["Food"].level), (D("200"), "warning"))
         self.assertEqual((statuses["Transport"].spent, statuses["Transport"].level), (D("10.00"), "ok"))
 
+    def test_zero_and_month_specific_budgets(self):
+        from expense_tracker.storage import Budget
+        budgets = {
+            "Food": Budget("Food", D("1000"), months={"2026-09": D("0")}),  # September: 0, and S/ 200 spent
+            "Health": Budget("Health", D("0")),  # 0 and nothing spent
+            "Transport": Budget("Transport", D("50"), months={"2026-08": D("0")}),  # exception in another month
+        }
+        statuses = budget_statuses(self.expenses, budgets, "2026-09")
+        food, transport, health = statuses  # over a 0 budget first, nothing planned last
+        self.assertEqual([s.budget.category for s in statuses], ["Food", "Transport", "Health"])
+        self.assertEqual((food.limit, food.is_exception, food.ratio, food.level, food.fill),
+                         (D("0"), True, None, "over", 1.0))
+        self.assertEqual((health.limit, health.ratio, health.level, health.fill, health.remaining),
+                         (D("0"), None, "ok", 0.0, D("0")))
+        self.assertEqual((transport.limit, transport.is_exception, transport.level), (D("50"), False, "warning"))
+
     def test_monthly_totals_and_balance(self):
         months = last_n_months("2026-09", 3)
         self.assertEqual(months, ["2026-07", "2026-08", "2026-09"])
@@ -189,6 +252,21 @@ class ReportsTest(unittest.TestCase):
                          {"2026-07": D("0"), "2026-08": D("25.00"), "2026-09": D("70.00")})
         incomes = [Income(D("1000"), "Salary", date=date(2026, 9, 1), rate=D("4"))]
         self.assertEqual(balance(self.expenses, incomes, "2026-09", "PEN"), (D("1000"), D("240"), D("760")))
+
+    def test_suggest_budget_category(self):
+        from expense_tracker.reports import suggest_budget_category
+        from expense_tracker.storage import Budget
+        catalog = ["Food", "Groceries", "Transport", "Housing"]
+        # Most spending in Sep without a budget: Food (S/ 200) beats Transport (S/ 40)
+        self.assertEqual(suggest_budget_category(catalog, self.expenses, {}, "2026-09"), ("Food", True))
+        food = {"Food": Budget("Food", D("300"))}
+        self.assertEqual(suggest_budget_category(catalog, self.expenses, food, "2026-09"), ("Transport", True))
+        # No spending without a budget: first catalog category that has none
+        both = {**food, "Transport": Budget("Transport", D("100"))}
+        self.assertEqual(suggest_budget_category(catalog, self.expenses, both, "2026-09"), ("Groceries", False))
+        everything = {c: Budget(c, D("1")) for c in catalog}
+        self.assertEqual(suggest_budget_category(catalog, self.expenses, everything, "2026-09"), ("Food", False))
+        self.assertEqual(suggest_budget_category([], [], {}, "2026-09"), ("", False))
 
     def test_recent_tags(self):
         from expense_tracker.reports import recent_tags
@@ -223,6 +301,15 @@ class ReportsTest(unittest.TestCase):
     def test_add_months(self):
         self.assertEqual(add_months("2026-12", 1), "2027-01")
         self.assertEqual(add_months("2026-01", -1), "2025-12")
+
+    def test_subcategory_own_color(self):
+        from expense_tracker.catalog import Category, Item
+        housing = Category("Housing", "🏠", "#8d6cab", [Item("Mortgage", "🏠", "#ff0000"), Item("Property tax", "🏠")])
+        self.assertEqual(category_look([housing], "Housing", "Mortgage"), ("🏠", "#ff0000"))
+        self.assertEqual(category_look([housing], "Housing", "Property tax"), ("🏠", "#8d6cab"))  # follows category
+        again = Category.from_dict(housing.to_dict())
+        self.assertEqual(again, housing)
+        self.assertNotIn("color", Item("Cash", "💵").to_dict())  # payment methods etc. stay as before
 
     def test_category_look_fallbacks(self):
         cats = default_categories()

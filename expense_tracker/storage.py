@@ -8,6 +8,7 @@ paths.py) next to two folders:
 
 from __future__ import annotations
 
+import calendar
 import csv
 import json
 import os
@@ -48,7 +49,7 @@ def data_file_path() -> Path:
 
 # ---------- parsing & formatting ----------
 
-def _parse_positive(value: str | Decimal, step: Decimal, label: str) -> Decimal:
+def _parse_positive(value: str | Decimal, step: Decimal, label: str, allow_zero: bool = False) -> Decimal:
     text = str(value).strip()
     if "," in text and "." not in text and text.count(",") == 1:
         text = text.replace(",", ".")  # accept a comma as the decimal separator, e.g. "12,50"
@@ -56,13 +57,18 @@ def _parse_positive(value: str | Decimal, step: Decimal, label: str) -> Decimal:
         number = Decimal(text).quantize(step, rounding=ROUND_HALF_UP)
     except InvalidOperation:
         raise ValueError(f"Invalid {label}: {value!r}") from None
-    if number <= 0:
-        raise ValueError(f"{label.capitalize()} must be greater than zero")
+    if number < 0 or (number == 0 and not allow_zero):
+        raise ValueError(f"{label.capitalize()} must be {'zero or more' if allow_zero else 'greater than zero'}")
     return number
 
 
 def parse_amount(value: str | Decimal) -> Decimal:
     return _parse_positive(value, CENT, "amount")
+
+
+def parse_budget_amount(value: str | Decimal) -> Decimal:
+    """A budget limit: like an amount, but 0 is allowed (a month with nothing planned)."""
+    return _parse_positive(value, CENT, "budget", allow_zero=True)
 
 
 def parse_rate(value: str | Decimal) -> Decimal:
@@ -148,6 +154,15 @@ def add_months(month: str, n: int) -> str:
     year, mon = map(int, month.split("-"))
     index = year * 12 + (mon - 1) + n
     return f"{index // 12:04d}-{index % 12 + 1:02d}"
+
+
+def day_in_month(month: str, day: int) -> date:
+    """`day` of `month` ('2026-02'), moved to the month's last day when the month is shorter.
+
+    So day 31 is the last day of every month: 31 Jan, 28 Feb (29 in leap years), 30 Apr…
+    """
+    year, mon = map(int, month.split("-"))
+    return date(year, mon, min(day, calendar.monthrange(year, mon)[1]))
 
 
 def month_range(first: str, last: str) -> list[str]:
@@ -275,18 +290,29 @@ class Income(_Money):
 
 @dataclass
 class Budget:
-    """Monthly spending limit for one category."""
+    """Monthly spending limit for one category, with optional different amounts for specific months.
+
+    E.g. a mortgage paid every other month: usually S/ 3,000, but S/ 0 in the months it isn't paid.
+    """
 
     category: str
-    amount: Decimal
+    amount: Decimal  # the usual monthly limit (0 is allowed)
     currency: str = DEFAULT_CURRENCY
+    months: dict[str, Decimal] = field(default_factory=dict)  # exceptions: {"2026-11": Decimal("0")}
+
+    def amount_for(self, month: str) -> Decimal:
+        return self.months.get(month, self.amount)
 
     def to_dict(self) -> dict:
-        return {"amount": str(self.amount), "currency": self.currency}
+        d = {"amount": str(self.amount), "currency": self.currency}
+        if self.months:
+            d["months"] = {m: str(v) for m, v in sorted(self.months.items())}
+        return d
 
     @classmethod
     def from_dict(cls, category: str, d: dict) -> Budget:
-        return cls(category, parse_amount(d["amount"]), parse_currency(d.get("currency")))
+        return cls(category, parse_budget_amount(d["amount"]), parse_currency(d.get("currency")),
+                   {m: parse_budget_amount(v) for m, v in d.get("months", {}).items()})
 
 
 @dataclass
@@ -299,15 +325,15 @@ class RecurringExpense:
     description: str = ""
     currency: str = DEFAULT_CURRENCY
     payment_method: str = ""
-    day: int = 1  # day of the month it's due (1-28)
+    day: int = 1  # day of the month it's due (1-31; in shorter months, their last day)
     start_month: str = field(default_factory=lambda: month_key(date.today()))
     handled_through: str | None = None  # last month already added or skipped
     active: bool = True
     id: str = field(default_factory=_new_id)
 
     def __post_init__(self) -> None:
-        if not 1 <= int(self.day) <= 28:
-            raise ValueError("Day of month must be between 1 and 28")
+        if not 1 <= int(self.day) <= 31:
+            raise ValueError("Day of month must be between 1 and 31")
         self.day = int(self.day)
 
     def next_month(self) -> str:
@@ -318,12 +344,12 @@ class RecurringExpense:
         if not self.active:
             return []
         current = month_key(today)
-        last = current if today.day >= self.day else add_months(current, -1)
+        last = current if today >= self.occurrence_date(current) else add_months(current, -1)
         return month_range(self.next_month(), last)
 
     def occurrence_date(self, month: str) -> date:
-        year, mon = map(int, month.split("-"))
-        return date(year, mon, self.day)
+        """The date it's due in `month`; days past the month's end fall on its last day (31 → 30 Apr)."""
+        return day_in_month(month, self.day)
 
     def to_expense(self, month: str, rate: Decimal | None) -> Expense:
         return Expense(
@@ -621,14 +647,39 @@ class ExpenseStore:
     def budgets(self) -> dict[str, Budget]:
         return {name: Budget.from_dict(name, d) for name, d in self._read().get("budgets", {}).items()}
 
-    def set_budget(self, category: str, amount: Decimal | None, currency: str = DEFAULT_CURRENCY) -> None:
-        """Set (or with amount=None, remove) the monthly budget for a category."""
+    def set_budget(
+        self, category: str, amount: Decimal | None, currency: str = DEFAULT_CURRENCY, month: str | None = None
+    ) -> None:
+        """Set a category's budget.
+
+        Without `month`: the usual monthly amount (amount=None removes the whole budget, exceptions
+        included). With `month`: a different amount for that month only (amount=None removes that
+        exception, so the usual amount applies again). The currency applies to the whole budget.
+        """
         doc = self._read()
         budgets = doc.setdefault("budgets", {})
-        for key in [k for k in budgets if k.lower() == category.lower()]:
+        key = next((k for k in budgets if k.lower() == category.lower()), None)
+        existing = Budget.from_dict(key, budgets[key]) if key else None
+        if month is None:
+            if amount is None:
+                updated = None
+            else:
+                updated = Budget(category, amount, currency, existing.months if existing else {})
+        else:
+            if existing is None:
+                if amount is None:
+                    return  # no budget and no exception to remove
+                existing = Budget(category, Decimal("0.00"), currency)  # only this month has an amount
+            months = dict(existing.months)
+            if amount is None:
+                months.pop(month, None)
+            else:
+                months[month] = amount
+            updated = Budget(existing.category, existing.amount, currency, months)
+        if key:
             del budgets[key]
-        if amount is not None:
-            budgets[category] = Budget(category, amount, currency).to_dict()
+        if updated is not None:
+            budgets[updated.category] = updated.to_dict()
         self._write(doc)
 
     # --- recurring expenses ---

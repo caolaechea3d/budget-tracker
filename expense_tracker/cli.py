@@ -17,11 +17,13 @@ from .storage import (
     Expense,
     ExpenseStore,
     Income,
+    add_months,
     export_csv,
     format_money,
     format_rate,
     month_key,
     parse_amount,
+    parse_budget_amount,
     parse_currency,
     parse_date,
     parse_rate,
@@ -191,10 +193,17 @@ def cmd_income_list(store: ExpenseStore, args: argparse.Namespace) -> None:
 
 
 def cmd_budget_set(store: ExpenseStore, args: argparse.Namespace) -> None:
-    amount = None if args.amount.lower() in ("none", "remove", "0") else parse_amount(args.amount)
+    amount = None if args.amount.lower() in ("none", "remove") else parse_budget_amount(args.amount)
     category = args.category.strip().title()
-    store.set_budget(category, amount, parse_currency(args.currency))
-    print(f"Budget for {category}: {format_money(amount, parse_currency(args.currency)) if amount else 'removed'}")
+    currency = parse_currency(args.currency)
+    if args.month:
+        add_months(args.month, 0)  # validates YYYY-MM
+    store.set_budget(category, amount, currency, month=args.month)
+    where = f" in {args.month}" if args.month else ""
+    if amount is not None:
+        print(f"Budget for {category}{where}: {format_money(amount, currency)}")
+    else:
+        print(f"Budget for {category}{where}: " + ("back to the usual amount" if args.month else "removed"))
 
 
 def cmd_budget_list(store: ExpenseStore, args: argparse.Namespace) -> None:
@@ -206,8 +215,10 @@ def cmd_budget_list(store: ExpenseStore, args: argparse.Namespace) -> None:
     print(f"Budgets for {month}")
     for s in statuses:
         marker = {"ok": " ", "warning": "!", "over": "✗"}[s.level]
+        share = "   —" if s.ratio is None else f"{s.ratio * 100:4.0f}%"
+        note = f"  (this month only; usually {format_money(s.budget.amount, s.budget.currency)})" if s.is_exception else ""
         print(f"{marker} {s.budget.category[:20]:<22}{format_money(s.spent, s.budget.currency):>14} of "
-              f"{format_money(s.budget.amount, s.budget.currency):<14}{s.ratio * 100:5.0f}%")
+              f"{format_money(s.limit, s.budget.currency):<14}{share}{note}")
 
 
 def cmd_backup(store: ExpenseStore, args: argparse.Namespace) -> None:
@@ -389,9 +400,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("budget", help="Monthly budgets per category")
     budget = p.add_subparsers(dest="budget_command", required=True)
-    q = budget.add_parser("set", help="Set a budget (use 'none' as amount to remove it)")
+    q = budget.add_parser("set", help="Set a budget (0 is allowed; 'none' removes it)")
     q.add_argument("category")
-    q.add_argument("amount")
+    q.add_argument("amount", help="e.g. 800, 0, or 'none' to remove")
+    q.add_argument("--month", help="YYYY-MM: a different amount for this month only ('none' goes back to usual)")
     q.add_argument("--currency", default=DEFAULT_CURRENCY, **currency)
     q.set_defaults(func=cmd_budget_set)
     q = budget.add_parser("list", help="Show spending vs budget")

@@ -48,7 +48,7 @@ from .tabs import (
     PageData,
     RecurringTab,
 )
-from .widgets import MonthChoices, setup_style
+from .widgets import MonthChoices, month_label, setup_style
 
 ALL = "All months"
 
@@ -124,7 +124,7 @@ class ExpenseApp(ttk.Frame):
 
     def subcategory_options(self, category: str) -> list[tuple[str, str, str]]:
         cat = find_category(self.categories, category)
-        return [(s.name, s.icon, cat.color) for s in cat.subcategories] if cat else []
+        return [(s.name, s.icon, s.color or cat.color) for s in cat.subcategories] if cat else []
 
     def payment_options(self) -> list[tuple[str, str, str]]:
         return [(i.name, i.icon, "#8d99ae") for i in self.payment_methods]
@@ -402,8 +402,13 @@ class ExpenseApp(ttk.Frame):
         if parts:
             self.set_status(f"⚠ Debts: {' and '.join(parts)} — see the Debts tab.")
 
-    def budgets_changed(self, category: str, is_set: bool) -> None:
-        self.set_status(f"Budget for {category} {'saved' if is_set else 'removed'}.")
+    def budgets_changed(self, category: str, is_set: bool, month: str | None = None) -> None:
+        if month is None:
+            self.set_status(f"Budget for {category} {'saved' if is_set else 'removed'}.")
+        elif is_set:
+            self.set_status(f"Budget for {category} in {month_label(month)} saved.")
+        else:
+            self.set_status(f"{category} in {month_label(month)} uses the usual budget again.")
         self.refresh()
 
     def recurring_saved(self, item: RecurringExpense) -> None:

@@ -23,13 +23,17 @@ class Item:
 
     name: str
     icon: str = DEFAULT_ICON
+    color: str | None = None  # subcategories only: None = use the category's color
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "icon": self.icon}
+        d = {"name": self.name, "icon": self.icon}
+        if self.color:
+            d["color"] = self.color
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> Item:
-        return cls(name=d["name"], icon=d.get("icon") or DEFAULT_ICON)
+        return cls(name=d["name"], icon=d.get("icon") or DEFAULT_ICON, color=d.get("color") or None)
 
 
 @dataclass
@@ -152,5 +156,5 @@ def category_look(categories: list[Category], category: str, subcategory: str = 
     if subcategory:
         sub = cat.subcategory(subcategory)
         if sub is not None:
-            return sub.icon, cat.color
+            return sub.icon, sub.color or cat.color
     return cat.icon, cat.color

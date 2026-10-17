@@ -278,7 +278,12 @@ class ExpensesTab(Tab):
             icon, color = self.app.look(category)
             now, before = comparison.get(category, (amount, Decimal("0")))
             status = statuses.get(category.lower())
-            budget_text = f"{status.ratio * 100:.0f}%" if status else ""
+            if status is None:
+                budget_text = ""
+            elif status.ratio is None:  # a 0 budget this month
+                budget_text = "over" if status.spent > 0 else "—"
+            else:
+                budget_text = f"{status.ratio * 100:.0f}%"
             iid = f"cat:{category}"
             self.summary.insert("", "end", iid=iid, open=iid in open_rows, **self.app.icon_text(icon, color, category),
                                 tags=(status.level,) if status and status.level != "ok" else (),
@@ -288,9 +293,9 @@ class ExpensesTab(Tab):
             subs = by_subcategory(period_expenses, category, show_in)
             if len(subs) > 1 or (len(subs) == 1 and "" not in subs):
                 for sub, value in subs.items():
-                    sub_icon, _ = self.app.look(category, sub) if sub else ("▫", color)
+                    sub_icon, sub_color = self.app.look(category, sub) if sub else ("▫", color)
                     self.summary.insert(iid, "end", tags=("sub",),
-                                        **self.app.icon_text(sub_icon, color, sub or "(no subcategory)"),
+                                        **self.app.icon_text(sub_icon, sub_color, sub or "(no subcategory)"),
                                         values=(format_money(value, show_in),
                                                 f"{value / grand * 100:.1f}" if grand else "", "", ""))
 

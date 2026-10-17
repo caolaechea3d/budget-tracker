@@ -95,7 +95,7 @@ class DebtDialog(Dialog):
         self.deadline_var = tk.StringVar(value=(base.deadline or date.today()).isoformat())
         self.has_installments = tk.BooleanVar(value=base.installments is not None)
         self.installments_var = tk.StringVar(value=str(base.installments or 12))
-        self.day_var = tk.StringVar(value=str(base.payment_day or min(date.today().day, 28)))
+        self.day_var = tk.StringVar(value=str(base.payment_day or date.today().day))
         self.notes_var = tk.StringVar(value=base.notes)
         self.plan_var = tk.StringVar()
 
@@ -128,7 +128,7 @@ class DebtDialog(Dialog):
         self.count_box = ttk.Spinbox(plan_row, from_=1, to=360, width=5, textvariable=self.installments_var)
         self.count_box.pack(side="left", padx=(6, 4))
         ttk.Label(plan_row, text="payments, on day").pack(side="left")
-        self.day_box = ttk.Spinbox(plan_row, from_=1, to=28, width=4, textvariable=self.day_var)
+        self.day_box = ttk.Spinbox(plan_row, from_=1, to=31, width=4, textvariable=self.day_var)
         self.day_box.pack(side="left", padx=(4, 0))
         labeled(b, 10, "Installments", plan_row)
         ttk.Label(b, textvariable=self.plan_var, style="Muted.TLabel").grid(row=11, column=1, sticky="w")
@@ -170,8 +170,10 @@ class DebtDialog(Dialog):
             self.plan_var.set("")
             return
         dates = debt.schedule()
+        short_months = (" · on the last day of every month" if debt.payment_day == 31
+                        else " · shorter months: their last day" if debt.payment_day > 28 else "")
         self.plan_var.set(f"≈ {format_money(debt.installment_amount, debt.currency)} per month · "
-                          f"first {dates[0]:%d %b %Y} · last {dates[-1]:%d %b %Y}")
+                          f"first {dates[0]:%d %b %Y} · last {dates[-1]:%d %b %Y}{short_months}")
 
     def on_ok(self) -> bool:
         try:

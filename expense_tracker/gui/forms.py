@@ -10,6 +10,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import TYPE_CHECKING
 
+from ..reports import suggest_budget_category
 from ..storage import (
     CURRENCIES,
     DEFAULT_CURRENCY,
@@ -21,12 +22,13 @@ from ..storage import (
     format_rate,
     month_key,
     parse_amount,
+    parse_budget_amount,
     parse_currency,
     parse_date,
     parse_rate,
     parse_tags,
 )
-from .widgets import DateField, Dialog, MonthChoices, Picker, TagField, labeled
+from .widgets import DateField, Dialog, MonthChoices, Picker, TagField, labeled, month_label
 
 if TYPE_CHECKING:
     from .app import ExpenseApp
@@ -374,7 +376,22 @@ class RecurringDialog(Dialog):
             on_new=app.add_payment_method, new_label="New payment method…", width=22,
         ), sticky="ew")
         labeled(b, 5, "Description", ttk.Entry(b, textvariable=self.description_var, width=34), sticky="ew")
-        labeled(b, 6, "Day of the month", ttk.Spinbox(b, from_=1, to=28, textvariable=self.day_var, width=6))
+        day_row = ttk.Frame(b)
+        ttk.Spinbox(day_row, from_=1, to=31, textvariable=self.day_var, width=6).pack(side="left")
+        day_hint = ttk.Label(day_row, style="Muted.TLabel")
+        day_hint.pack(side="left", padx=(8, 0))
+        labeled(b, 6, "Day of the month", day_row)
+
+        def explain_day(*_) -> None:
+            day = self.day_var.get().strip()
+            if day == "31":
+                day_hint.configure(text="= the last day of every month")
+            elif day in ("29", "30"):
+                day_hint.configure(text="shorter months: their last day (e.g. 28 Feb)")
+            else:
+                day_hint.configure(text="")
+        self.day_var.trace_add("write", explain_day)
+        explain_day()
         this_month = month_key(date.today())
         months = [add_months(this_month, n) for n in range(-12, 13)]
         month_box = labeled(b, 7, "Next month to add", ttk.Combobox(b, width=16, state="readonly"))
@@ -470,41 +487,89 @@ class DueRecurringDialog(Dialog):
 # ---------- budget ----------
 
 class BudgetDialog(Dialog):
+    """Set a category's usual monthly budget, or a different amount for one month (0 allowed)."""
+
+    EVERY_MONTH, ONE_MONTH = "every", "one"
+
     def __init__(self, app: ExpenseApp, category: str = ""):
         self.app = app
+        self.month = app.focus_month()  # the month shown in the Budgets tab
         super().__init__(app, "Monthly budget")
-        existing = app.store.budgets()
-        current = next((bud for name, bud in existing.items() if name.lower() == category.lower()), None)
+        suggested_by_spending = False
+        if not category:  # "Set budget…": start from a sensible category instead of none
+            category, suggested_by_spending = suggest_budget_category(
+                [c.name for c in app.categories], app.expenses_tab.expenses, app.store.budgets(), self.month)
         b = self.body
         self.category_var = tk.StringVar(value=category)
-        self.amount_var = tk.StringVar(value=f"{current.amount:.2f}" if current else "")
-        self.currency_var = tk.StringVar(value=current.currency if current else DEFAULT_CURRENCY)
+        self.amount_var = tk.StringVar()
+        self.currency_var = tk.StringVar(value=DEFAULT_CURRENCY)
+        self.scope_var = tk.StringVar(value=self.EVERY_MONTH)
+        self.hint_var = tk.StringVar()
+        self.suggested_by_spending = suggested_by_spending
+
         labeled(b, 0, "Category", Picker(
             b, app.icons, self.category_var, app.category_options, on_change=self._load_existing, width=22,
         ), sticky="ew")
-        amount = labeled(b, 1, "Budget per month", ttk.Entry(b, textvariable=self.amount_var, width=14, justify="right"))
-        labeled(b, 2, "Currency", ttk.Combobox(b, textvariable=self.currency_var, values=CURRENCIES, width=7, state="readonly"))
-        ttk.Label(b, text="Leave the amount empty to remove the budget.", style="Muted.TLabel").grid(
-            row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        amount = labeled(b, 1, "Budget", ttk.Entry(b, textvariable=self.amount_var, width=14, justify="right"))
+        labeled(b, 2, "Currency", ttk.Combobox(b, textvariable=self.currency_var, values=CURRENCIES, width=7,
+                                               state="readonly"))
+        scope = ttk.Frame(b)
+        ttk.Radiobutton(scope, text="Every month", value=self.EVERY_MONTH, variable=self.scope_var,
+                        command=self._scope_changed).pack(anchor="w")
+        ttk.Radiobutton(scope, text=f"Only {month_label(self.month)}", value=self.ONE_MONTH,
+                        variable=self.scope_var, command=self._scope_changed).pack(anchor="w")
+        labeled(b, 3, "Applies to", scope)
+        ttk.Label(b, textvariable=self.hint_var, style="Muted.TLabel", justify="left").grid(
+            row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self._load_existing()
         self.show(amount)
 
+    def _budget(self):
+        name = self.category_var.get().lower()
+        return next((bud for key, bud in self.app.store.budgets().items() if key.lower() == name), None)
+
     def _load_existing(self) -> None:
-        budget = next((bud for name, bud in self.app.store.budgets().items()
-                       if name.lower() == self.category_var.get().lower()), None)
-        self.amount_var.set(f"{budget.amount:.2f}" if budget else "")
+        """Show the category's current budget; open on "Only <month>" if that month has its own amount."""
+        budget = self._budget()
         if budget:
             self.currency_var.set(budget.currency)
+        self.scope_var.set(self.ONE_MONTH if budget and self.month in budget.months else self.EVERY_MONTH)
+        self._scope_changed()
+
+    def _scope_changed(self) -> None:
+        budget = self._budget()
+        month = month_label(self.month)
+        if self.scope_var.get() == self.ONE_MONTH:
+            value = budget.months.get(self.month) if budget else None
+            hint = (f"Use 0 for a month with nothing planned (e.g. a payment that isn't due in {month}).\n"
+                    f"Leave it empty to use the usual amount again in {month}.")
+        else:
+            value = budget.amount if budget else None
+            hint = "0 is allowed. Leave it empty to remove this budget from every month."
+        self.amount_var.set("" if value is None else f"{value:.2f}")
+        if budget:
+            usual = f"Usually {format_money(budget.amount, budget.currency)} a month"
+            exceptions = len(budget.months)
+            if exceptions:
+                usual += f" · {exceptions} month{'s' * (exceptions != 1)} with a different amount"
+            hint = f"{usual}.\n{hint}"
+        if self.suggested_by_spending:
+            hint = f"Suggested: your biggest spending this month without a budget.\n{hint}"
+        self.hint_var.set(hint)
 
     def on_ok(self) -> bool:
         category = self.category_var.get().strip()
+        one_month = self.scope_var.get() == self.ONE_MONTH
         try:
             if not category:
                 raise ValueError("Choose a category")
-            amount = parse_amount(self.amount_var.get()) if self.amount_var.get().strip() else None
-            self.app.store.set_budget(category, amount, parse_currency(self.currency_var.get()))
+            text = self.amount_var.get().strip()
+            amount = parse_budget_amount(text) if text else None
+            self.app.store.set_budget(category, amount, parse_currency(self.currency_var.get()),
+                                      month=self.month if one_month else None)
         except ValueError as exc:
             messagebox.showerror("Invalid budget", str(exc), parent=self)
             return False
-        self.app.budgets_changed(category, amount is not None)
+        self.app.budgets_changed(category, amount is not None, self.month if one_month else None)
         return True
 

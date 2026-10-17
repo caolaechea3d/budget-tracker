@@ -54,17 +54,16 @@ class BudgetsTab(Tab):
                       style="Bold.TLabel").grid(row=row, column=0, sticky="w", pady=6, padx=(0, 10))
             bar = tk.Canvas(inner, height=round(14 * self.icons.scale), highlightthickness=0, background="#e5e7eb")
             bar.grid(row=row, column=2, sticky="ew", padx=(0, 12))
-            ratio = float(status.ratio)
             bar_color = LEVEL_COLORS[status.level]
-            bar.bind("<Configure>", lambda e, c=bar, r=ratio, col=bar_color: self._draw_progress(c, r, col))
-            left_text = (f"{format_money(status.remaining, b.currency)} left" if status.remaining >= 0
-                         else f"over by {format_money(-status.remaining, b.currency)}")
-            text = (f"{format_money(status.spent, b.currency)} of {format_money(b.amount, b.currency)}"
-                    f" · {ratio * 100:.0f}% · {left_text}")
-            if status.missing_rate:
-                text += f" · {status.missing_rate} without rate"
+            bar.bind("<Configure>", lambda e, c=bar, r=status.fill, col=bar_color: self._draw_progress(c, r, col))
             label_style = {"ok": "TLabel", "warning": "Warning.TLabel", "over": "Over.TLabel"}[status.level]
-            ttk.Label(inner, text=text, style=label_style).grid(row=row, column=3, sticky="w", padx=(0, 10))
+            details = ttk.Frame(inner)
+            details.grid(row=row, column=3, sticky="w", padx=(0, 10))
+            ttk.Label(details, text=self._status_text(status), style=label_style).pack(anchor="w")
+            if status.is_exception:
+                ttk.Label(details, text=f"{month_label(month)} only · usually "
+                                        f"{format_money(b.amount, b.currency)} a month",
+                          style="Muted.TLabel").pack(anchor="w")
             ttk.Button(inner, text="Edit", width=6,
                        command=lambda c=b.category: BudgetDialog(self.app, c)).grid(row=row, column=4)
             ttk.Button(inner, text="Remove", width=8,
@@ -93,6 +92,21 @@ class BudgetsTab(Tab):
             row += 1
 
     @staticmethod
+    def _status_text(status) -> str:
+        currency = status.budget.currency
+        spent, limit = format_money(status.spent, currency), format_money(status.limit, currency)
+        if status.ratio is None:  # a 0 budget this month
+            text = (f"Nothing planned this month (budget {limit})" if status.spent == 0
+                    else f"{spent} spent · budget {limit} this month · over by {spent}")
+        else:
+            left = (f"{format_money(status.remaining, currency)} left" if status.remaining >= 0
+                    else f"over by {format_money(-status.remaining, currency)}")
+            text = f"{spent} of {limit} · {status.ratio * 100:.0f}% · {left}"
+        if status.missing_rate:
+            text += f" · {status.missing_rate} without rate"
+        return text
+
+    @staticmethod
     def _draw_progress(canvas: tk.Canvas, ratio: float, color: str) -> None:
         canvas.delete("all")
         width, height = canvas.winfo_width(), canvas.winfo_height()
@@ -101,6 +115,8 @@ class BudgetsTab(Tab):
             canvas.create_line(width - 1, 0, width - 1, height, fill="#7f1d1d", width=2)
 
     def remove_budget(self, category: str) -> None:
-        if messagebox.askyesno("Remove budget", f"Remove the monthly budget for {category}?"):
+        if messagebox.askyesno("Remove budget", f"Remove the budget for {category}?\n\n"
+                                                "This removes it for every month, including any month with "
+                                                "its own amount. To change just one month, use Edit."):
             self.app.store.set_budget(category, None)
             self.app.budgets_changed(category, False)

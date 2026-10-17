@@ -17,11 +17,14 @@ if TYPE_CHECKING:
 class IconChooser(Dialog):
     """Pick an emoji (and optionally a color). Result in `.result` as (icon, color) or None."""
 
-    def __init__(self, app: ExpenseApp, icon: str, color: str | None, parent: tk.Misc | None = None):
+    def __init__(self, app: ExpenseApp, icon: str, color: str | None, parent: tk.Misc | None = None,
+                 inherited_color: str | None = None):
+        """`inherited_color` (for subcategories) adds a "Same as category" button that resets to it."""
         self.app = app
         self.result: tuple[str, str | None] | None = None
         self.icon_var = tk.StringVar(value=icon)
         self.color = color
+        self.inherited_color = inherited_color
         super().__init__(parent or app, "Choose icon", ok_text="Use this icon")
         b = self.body
         grid = ttk.Frame(b)
@@ -41,8 +44,11 @@ class IconChooser(Dialog):
         self.preview = ttk.Label(b)
         self.preview.grid(row=1, column=2, sticky="w", pady=(10, 0), padx=(10, 0))
         if color is not None:
-            ttk.Button(b, text="Change color…", command=self._pick_color).grid(
-                row=2, column=0, sticky="w", pady=(8, 0))
+            colors = ttk.Frame(b)
+            colors.grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 0))
+            ttk.Button(colors, text="Change color…", command=self._pick_color).pack(side="left")
+            if inherited_color:
+                ttk.Button(colors, text="Same as category", command=self._inherit_color).pack(side="left", padx=(6, 0))
         self.icon_var.trace_add("write", lambda *_: self._update_preview())
         self._update_preview()
         self.show(entry, bind_return=True)
@@ -53,6 +59,10 @@ class IconChooser(Dialog):
         if hex_color:
             self.color = hex_color
             self._update_preview()
+
+    def _inherit_color(self) -> None:
+        self.color = self.inherited_color
+        self._update_preview()
 
     def _update_preview(self) -> None:
         icon = self.icon_var.get().strip()
@@ -69,9 +79,10 @@ class IconChooser(Dialog):
 
 
 def ask_icon(
-    app: ExpenseApp, icon: str, color: str | None = None, parent: tk.Misc | None = None
+    app: ExpenseApp, icon: str, color: str | None = None, parent: tk.Misc | None = None,
+    inherited_color: str | None = None,
 ) -> tuple[str, str | None] | None:
-    dialog = IconChooser(app, icon, color, parent)
+    dialog = IconChooser(app, icon, color, parent, inherited_color)
     app.wait_window(dialog)
     return dialog.result
 
@@ -131,7 +142,7 @@ class CategoriesDialog(Dialog):
             self.tree.insert("", "end", iid=cid, text=f" {cat.name}" if image else icons.text(cat.icon, cat.name),
                              image=image or "", open=cat.name in open_items)
             for si, sub in enumerate(cat.subcategories):
-                simage = icons.get(sub.icon, cat.color)
+                simage = icons.get(sub.icon, sub.color or cat.color)
                 self.tree.insert(cid, "end", iid=f"c{ci}s{si}", text=f" {sub.name}" if simage else icons.text(sub.icon, sub.name),
                                  image=simage or "")
         if select and self.tree.exists(select):
@@ -211,9 +222,12 @@ class CategoriesDialog(Dialog):
             if result:
                 cat.icon, cat.color = result[0], result[1] or cat.color
         else:
-            result = ask_icon(self.app, cat.subcategories[s].icon, None, parent=self)
+            sub = cat.subcategories[s]
+            result = ask_icon(self.app, sub.icon, sub.color or cat.color, parent=self, inherited_color=cat.color)
             if result:
-                cat.subcategories[s].icon = result[0]
+                # Its own color only when it differs from the category's; otherwise follow the category.
+                sub.icon = result[0]
+                sub.color = result[1] if result[1] and result[1].lower() != cat.color.lower() else None
         if result:
             self._save(f"c{c}" if s is None else f"c{c}s{s}")
 

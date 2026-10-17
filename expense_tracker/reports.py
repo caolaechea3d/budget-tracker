@@ -93,21 +93,41 @@ class BudgetStatus:
     budget: Budget
     spent: Decimal
     missing_rate: int  # expenses that couldn't be converted into the budget's currency
+    month: str = ""
 
     @property
-    def ratio(self) -> Decimal:
-        return self.spent / self.budget.amount
+    def limit(self) -> Decimal:
+        """The budget for this month: the usual amount, or this month's exception."""
+        return self.budget.amount_for(self.month)
+
+    @property
+    def is_exception(self) -> bool:
+        return self.month in self.budget.months
+
+    @property
+    def ratio(self) -> Decimal | None:
+        """Share of the budget spent; None when the budget is 0."""
+        return None if self.limit == 0 else self.spent / self.limit
 
     @property
     def remaining(self) -> Decimal:
-        return self.budget.amount - self.spent
+        return self.limit - self.spent
 
     @property
     def level(self) -> str:
         """'ok' below 80%, 'warning' from 80% up to 100%, 'over' above the budget."""
-        if self.spent > self.budget.amount:
+        if self.spent > self.limit:
             return "over"
+        if self.ratio is None:
+            return "ok"  # a 0 budget with nothing spent
         return "warning" if self.ratio >= Decimal("0.8") else "ok"
+
+    @property
+    def fill(self) -> float:
+        """How full the progress bar is (0..1+): over a 0 budget counts as full."""
+        if self.ratio is None:
+            return 1.0 if self.spent > 0 else 0.0
+        return float(self.ratio)
 
 
 def budget_statuses(expenses: list[Expense], budgets: dict[str, Budget], month: str) -> list[BudgetStatus]:
@@ -123,8 +143,32 @@ def budget_statuses(expenses: list[Expense], budgets: dict[str, Budget], month: 
                     missing += 1
                 else:
                     spent += value
-        statuses.append(BudgetStatus(budget, spent, missing))
-    return sorted(statuses, key=lambda s: s.ratio, reverse=True)
+        statuses.append(BudgetStatus(budget, spent, missing, month))
+    def fullness(s: BudgetStatus) -> Decimal:
+        if s.ratio is not None:
+            return s.ratio
+        return Decimal(1000) if s.spent > 0 else Decimal(-1)  # over a 0 budget: top; nothing planned: bottom
+
+    return sorted(statuses, key=fullness, reverse=True)
+
+
+def suggest_budget_category(
+    categories: list[str], expenses: list[Expense], budgets: dict[str, Budget], month: str
+) -> tuple[str, bool]:
+    """The category to preselect when setting a new budget, and whether it was chosen by spending.
+
+    Prefers the category with the most spending in `month` that has no budget yet, then the first
+    category (in catalog order) without a budget, then simply the first category.
+    """
+    budgeted = {name.lower() for name in budgets}
+    spending = category_totals(expenses, month, "PEN")
+    by_spending = sorted((c for c in spending if c.lower() not in budgeted), key=lambda c: spending[c], reverse=True)
+    if by_spending:
+        return by_spending[0], True
+    unbudgeted = [c for c in categories if c.lower() not in budgeted]
+    if unbudgeted:
+        return unbudgeted[0], False
+    return (categories[0] if categories else ""), False
 
 
 def balance(expenses: list[Expense], incomes: list[Income], month: str | None, currency: str) -> tuple[Decimal, Decimal, Decimal]:

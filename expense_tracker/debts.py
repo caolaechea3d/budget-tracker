@@ -21,6 +21,7 @@ from .storage import (
     Income,
     add_months,
     convert,
+    day_in_month,
     month_key,
     parse_amount,
     parse_currency,
@@ -69,13 +70,10 @@ def _new_id() -> str:
 
 
 def _monthly(start: date, day: int, count: int) -> list[date]:
-    """`count` monthly dates on `day`, the first one strictly after `start`."""
-    first_month = month_key(start) if start.day < day else add_months(month_key(start), 1)
-    dates = []
-    for n in range(count):
-        year, mon = map(int, add_months(first_month, n).split("-"))
-        dates.append(date(year, mon, day))
-    return dates
+    """`count` monthly dates on `day` (the month's last day when it's shorter), the first one after `start`."""
+    this_month = month_key(start)
+    first_month = this_month if day_in_month(this_month, day) > start else add_months(this_month, 1)
+    return [day_in_month(add_months(first_month, n), day) for n in range(count)]
 
 
 @dataclass
@@ -110,7 +108,7 @@ class Debt:
     start_date: date = field(default_factory=date.today)
     deadline: date | None = None  # None = no deadline
     installments: int | None = None  # number of monthly payments, or None
-    payment_day: int | None = None  # day of the month installments are due (1-28)
+    payment_day: int | None = None  # day of the month installments are due (1-31; shorter months: last day)
     notes: str = ""
     settled: bool = False  # marked as paid off by hand (e.g. settled for less)
     payments: list[DebtPayment] = field(default_factory=list)
@@ -124,8 +122,8 @@ class Debt:
         if self.installments is not None:
             if not 1 <= int(self.installments) <= 360:
                 raise ValueError("Installments must be between 1 and 360")
-            if self.payment_day is None or not 1 <= int(self.payment_day) <= 28:
-                raise ValueError("Installments need a day of the month between 1 and 28")
+            if self.payment_day is None or not 1 <= int(self.payment_day) <= 31:
+                raise ValueError("Installments need a day of the month between 1 and 31")
             self.installments, self.payment_day = int(self.installments), int(self.payment_day)
         if self.deadline is not None and self.deadline < self.start_date:
             raise ValueError("The deadline can't be before the start date")
