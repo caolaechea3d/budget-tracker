@@ -33,10 +33,18 @@ click **More info → Run anyway**.
   installments ("cuotas"), payment history, and reminders when something is due or overdue.
 - **Recurring expenses** — rent, subscriptions and bills, offered for adding each month.
 - **Charts** — spending by category and income vs. expenses over the last 12 months.
+- **Daily expenses** — a table with a block per day: every category side by side with its items,
+  descriptions and amounts, and the day's sums. Double-click an expense to edit it; export it to
+  Excel with the same layout.
+- **Month in review** — how a month went compared with a usual month: what stood out (big
+  changes, unusually large expenses, possible duplicates), spending by category, biggest expenses,
+  budgets and debts, plus where the current month is heading. Saved as a printable web page.
 - **Bank statement import** — CSV files with `;` separators, `1.234,56` amounts and `DD/MM/YYYY`
   dates; duplicates are skipped.
+- **Export** — a formatted Excel workbook (expenses and income sheets, filters, totals that
+  follow the filter, print-ready) or plain CSV with readable headers and a totals line.
 - **Everyday comforts** — undo/redo (Ctrl+Z / Ctrl+Y), search across all months, sortable
-  columns, filters, a calendar date picker, receipts attached to expenses, CSV export.
+  columns, filters, a calendar date picker, receipts attached to expenses.
 - **Several users** — a start screen to pick who's using the app; each user has separate data,
   receipts and backups.
 - **Safe storage** — atomic saves (a crash never leaves a half-written file) and an automatic
@@ -51,7 +59,8 @@ click **More info → Run anyway**.
 
 ## How it's built
 
-Python 3 with Tkinter for the interface and Pillow for the color icons; data is plain JSON files.
+Python 3 with Tkinter for the interface, Pillow for the color icons and openpyxl for the Excel
+export; data is plain JSON files.
 
 ```
 expense_tracker/
@@ -59,12 +68,16 @@ expense_tracker/
   debts.py        debts, installment schedules and payments
   undo.py         undo/redo history
   reports.py      totals, comparisons, budget status, search
+  daily.py        the daily expenses table
+  review.py       the month in review (calculations and wording)
+  review_html.py  the month in review as a printable HTML page
   importer.py     bank-statement CSV import
+  exporter.py     CSV and Excel export (expenses and income, daily table)
   users.py        users, each with their own data folder
   paths.py        where data lives (from source, portable, or installed)
   cli.py          command-line interface
   gui/            the window: start screen, dialogs, widgets, charts
-  gui/tabs/       one module per tab (expenses, income, debts, charts, budgets, recurring)
+  gui/tabs/       one module per tab (expenses, income, debts, charts, reports, budgets, recurring)
 tests/            unit tests (python -m unittest)
 build.py          builds the Windows app with PyInstaller (+ Inno Setup installer)
 ```
@@ -99,7 +112,8 @@ python main.py
 ```
 
 [Pillow](https://pypi.org/project/pillow/) draws the color icons; without it the app still works
-with plain emoji. To try the app with demo data instead of your own:
+with plain emoji. [openpyxl](https://pypi.org/project/openpyxl/) writes the Excel export. To try the
+app with demo data instead of your own:
 
 ```
 python tools/demo_data.py demo-data
@@ -139,6 +153,8 @@ python -m expense_tracker income add 5200 salary
 python -m expense_tracker budget set transport 250
 python -m expense_tracker debts --in USD                    # open debts; --all includes paid-off ones
 python -m expense_tracker export expenses.csv --month 2026-09
+python -m expense_tracker export budget.xlsx --month 2026-09 # Excel: expenses and income
+python -m expense_tracker export income.csv --income
 python -m expense_tracker backup
 python -m expense_tracker users list
 python -m expense_tracker --user Oficina list               # any command, for a specific user

@@ -9,7 +9,6 @@ paths.py) next to two folders:
 from __future__ import annotations
 
 import calendar
-import csv
 import json
 import os
 import shutil
@@ -817,25 +816,7 @@ class ExpenseStore:
             os.replace(path, removed / name)
 
 
-# ---------- export & totals ----------
-
-def export_csv(expenses: list[Expense], path: Path) -> None:
-    def s(value: Decimal | None) -> str:
-        return "" if value is None else str(value)
-
-    with Path(path).open("w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "id", "date", "category", "subcategory", "description", "payment_method", "tags",
-            "currency", "amount", "rate_pen_per_usd", "amount_pen", "amount_usd",
-        ])
-        for e in expenses:
-            writer.writerow([
-                e.id, e.date.isoformat(), e.category, e.subcategory, e.description,
-                e.payment_method, ", ".join(e.tags),
-                e.currency, str(e.amount), s(e.rate), s(e.amount_pen), s(e.amount_usd),
-            ])
-
+# ---------- totals ----------
 
 def total_in(records: list[_Money], currency: str) -> tuple[Decimal, int]:
     """Sum of records in `currency`, plus how many had to be skipped for lacking a rate."""

@@ -208,6 +208,20 @@ class ExpensesTab(Tab):
         tags = sorted({t for e in self.expenses for t in e.tags})
         return [(t, "🏷", "#8d99ae") for t in tags]
 
+    def filter_summary(self) -> str:
+        """The search and filters in use, in words (e.g. "Category: Food · Tag: #trip"), or ""."""
+        parts = []
+        search = self.app.search_var.get().strip()
+        if search:
+            parts.append(f"Search: “{search}” in all months")
+        if self.category_filter_var.get():
+            parts.append(f"Category: {self.category_filter_var.get()}")
+        if self.payment_filter_var.get():
+            parts.append(f"Payment: {self.payment_filter_var.get()}")
+        if self.tag_filter_var.get():
+            parts.append(f"Tag: #{self.tag_filter_var.get()}")
+        return " · ".join(parts)
+
     def _visible(self, period: str | None) -> tuple[list[Expense], str]:
         search = self.app.search_var.get().strip()
         expenses = self.expenses if search else in_month(self.expenses, period)

@@ -482,6 +482,21 @@ class ScrollableFrame(ttk.Frame):
         self.canvas.yview_scroll(int(-event.delta / 120), "units")
 
 
+def progress_bar(parent: tk.Misc, fill: float, color: str, height: int) -> tk.Canvas:
+    """A thin bar filled to `fill` (0..1); above 1 it's full with a dark mark at the end."""
+    bar = tk.Canvas(parent, height=height, highlightthickness=0, background="#e5e7eb")
+
+    def draw(_event: tk.Event | None = None) -> None:
+        bar.delete("all")
+        width = bar.winfo_width()
+        bar.create_rectangle(0, 0, width * min(fill, 1.0), height, fill=color, outline="")
+        if fill > 1:
+            bar.create_line(width - 1, 0, width - 1, height, fill="#7f1d1d", width=2)
+
+    bar.bind("<Configure>", draw)
+    return bar
+
+
 def setup_style(widget: tk.Misc, icons: Icons) -> None:
     """Named ttk styles shared by every screen."""
     style = ttk.Style(widget)
@@ -491,6 +506,8 @@ def setup_style(widget: tk.Misc, icons: Icons) -> None:
     style.configure("Muted.TLabel", foreground="#6b7280")
     style.configure("Warning.TLabel", foreground="#b35c00")
     style.configure("Over.TLabel", foreground="#c0392b", font=("Segoe UI", 9, "bold"))
+    style.configure("Good.TLabel", foreground="#2f855a")
+    style.configure("Bad.TLabel", foreground="#c0392b")
     style.configure("Bold.TLabel", font=("Segoe UI", 10, "bold"))
     style.configure("Title.TLabel", font=("Segoe UI", 12, "bold"))
     style.configure("CardTitle.TLabel", foreground="#6b7280", font=("Segoe UI", 9))

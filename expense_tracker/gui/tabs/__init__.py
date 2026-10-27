@@ -7,8 +7,9 @@ from .debts import DebtsTab
 from .expenses import ExpensesTab
 from .income import IncomeTab
 from .recurring import RecurringTab
+from .reports import ReportsTab
 
 __all__ = [
     "Tab", "PageData", "EXPENSE_COLOR", "INCOME_COLOR",
-    "ExpensesTab", "IncomeTab", "DebtsTab", "ChartsTab", "BudgetsTab", "RecurringTab",
+    "ExpensesTab", "IncomeTab", "DebtsTab", "ChartsTab", "ReportsTab", "BudgetsTab", "RecurringTab",
 ]

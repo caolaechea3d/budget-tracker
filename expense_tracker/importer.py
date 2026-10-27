@@ -138,6 +138,8 @@ def build_expenses(
     result = ImportResult(expenses=[])
     for line, row in enumerate(data.rows, start=2):
         try:
+            if row[opts.date_col].strip().lower().startswith("total"):  # a totals line, as in our own CSV export
+                continue
             when = parse_date_flexible(row[opts.date_col], opts.date_format)
             signed = parse_amount_flexible(row[opts.amount_col])
             if signed == 0:

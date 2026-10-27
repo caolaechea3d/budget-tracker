@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import tkinter as tk
 from tkinter import messagebox, ttk
 
-from ...reports import OTHER, BudgetStatus, budget_statuses, category_totals, is_year
+from ...reports import OTHER, BudgetStatus, budget_statuses, budget_text, category_totals, is_year
 from ...storage import DEFAULT_CURRENCY, format_money
 from ..forms import BudgetDialog
-from ..widgets import ScrollableFrame, month_label
+from ..widgets import ScrollableFrame, month_label, progress_bar
 from .base import LEVEL_COLORS, PageData, Tab
 
 
@@ -67,15 +66,13 @@ class BudgetsTab(Tab):
                   style="TLabel" if is_part else "Bold.TLabel").grid(
             row=row, column=0, sticky="w", pady=(2, 2) if is_part else (8, 2), padx=(28 if is_part else 0, 10))
         height = round((10 if is_part else 14) * self.icons.scale)
-        bar = tk.Canvas(inner, height=height, highlightthickness=0, background="#e5e7eb")
-        bar.grid(row=row, column=2, sticky="ew", padx=(0, 12))
-        bar_color = LEVEL_COLORS[status.level]
-        bar.bind("<Configure>", lambda e, c=bar, r=status.fill, col=bar_color: self._draw_progress(c, r, col))
+        progress_bar(inner, status.fill, LEVEL_COLORS[status.level], height).grid(
+            row=row, column=2, sticky="ew", padx=(0, 12))
 
         label_style = {"ok": "TLabel", "warning": "Warning.TLabel", "over": "Over.TLabel"}[status.level]
         details = ttk.Frame(inner)
         details.grid(row=row, column=3, sticky="w", padx=(0, 10))
-        ttk.Label(details, text=self._status_text(status), style=label_style).pack(anchor="w")
+        ttk.Label(details, text=budget_text(status), style=label_style).pack(anchor="w")
         notes = []
         if status.parts:
             notes.append("Sum of: " + ", ".join(p.label for p in status.parts))
@@ -113,29 +110,6 @@ class BudgetsTab(Tab):
             ttk.Button(inner, text="Set budget", command=lambda c=category: BudgetDialog(self.app, c)).grid(
                 row=row, column=4, columnspan=2, sticky="w")
             row += 1
-
-    @staticmethod
-    def _status_text(status: BudgetStatus) -> str:
-        currency = status.currency
-        spent, limit = format_money(status.spent, currency), format_money(status.limit, currency)
-        if status.ratio is None:  # a 0 budget this month
-            text = (f"Nothing planned this month (budget {limit})" if status.spent == 0
-                    else f"{spent} spent · budget {limit} this month · over by {spent}")
-        else:
-            left = (f"{format_money(status.remaining, currency)} left" if status.remaining >= 0
-                    else f"over by {format_money(-status.remaining, currency)}")
-            text = f"{spent} of {limit} · {status.ratio * 100:.0f}% · {left}"
-        if status.missing_rate:
-            text += f" · {status.missing_rate} without rate"
-        return text
-
-    @staticmethod
-    def _draw_progress(canvas: tk.Canvas, ratio: float, color: str) -> None:
-        canvas.delete("all")
-        width, height = canvas.winfo_width(), canvas.winfo_height()
-        canvas.create_rectangle(0, 0, width * min(ratio, 1.0), height, fill=color, outline="")
-        if ratio > 1:
-            canvas.create_line(width - 1, 0, width - 1, height, fill="#7f1d1d", width=2)
 
     def remove_budget(self, category: str, subcategory: str | None = None) -> None:
         if subcategory:

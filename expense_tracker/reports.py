@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from .storage import Budget, Expense, Income, add_months, month_key, month_range
+from .storage import Budget, Expense, Income, add_months, format_money, month_key, month_range
 
 ZERO = Decimal("0")
 
@@ -187,6 +187,22 @@ def budget_statuses(expenses: list[Expense], budgets: dict[str, Budget], month: 
         return Decimal(1000) if s.spent > 0 else Decimal(-1)  # over a 0 budget: top; nothing planned: bottom
 
     return sorted(statuses, key=fullness, reverse=True)
+
+
+def budget_text(status: BudgetStatus) -> str:
+    """'S/ 120.00 of S/ 150.00 · 80% · S/ 30.00 left', or what a 0 budget means this month."""
+    currency = status.currency
+    spent, limit = format_money(status.spent, currency), format_money(status.limit, currency)
+    if status.ratio is None:  # a 0 budget this month
+        text = (f"Nothing planned this month (budget {limit})" if status.spent == 0
+                else f"{spent} spent · budget {limit} this month · over by {spent}")
+    else:
+        left = (f"{format_money(status.remaining, currency)} left" if status.remaining >= 0
+                else f"over by {format_money(-status.remaining, currency)}")
+        text = f"{spent} of {limit} · {status.ratio * 100:.0f}% · {left}"
+    if status.missing_rate:
+        text += f" · {status.missing_rate} without rate"
+    return text
 
 
 def suggest_budget_category(

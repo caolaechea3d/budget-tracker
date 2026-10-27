@@ -10,7 +10,8 @@ from datetime import date
 from pathlib import Path
 
 from . import APP_NAME
-from .reports import budget_statuses, by_subcategory
+from .exporter import export_expenses_csv, export_income_csv, export_xlsx
+from .reports import budget_statuses, by_subcategory, in_month
 from .storage import (
     CURRENCIES,
     DEFAULT_CURRENCY,
@@ -18,7 +19,6 @@ from .storage import (
     ExpenseStore,
     Income,
     add_months,
-    export_csv,
     format_money,
     format_rate,
     month_key,
@@ -160,9 +160,17 @@ def cmd_delete(store: ExpenseStore, args: argparse.Namespace) -> None:
 
 
 def cmd_export(store: ExpenseStore, args: argparse.Namespace) -> None:
-    expenses = store.filter(month=args.month)
-    export_csv(expenses, Path(args.output))
-    print(f"Exported {len(expenses)} expenses to {args.output}")
+    output = Path(args.output)
+    expenses, incomes = store.filter(month=args.month), in_month(store.load_incomes(), args.month)
+    if output.suffix.lower() == ".xlsx":
+        export_xlsx(output, expenses, incomes, args.month or "All months")
+        print(f"Exported {len(expenses)} expenses and {len(incomes)} income entries to {output}")
+    elif args.income:
+        export_income_csv(incomes, output)
+        print(f"Exported {len(incomes)} income entries to {output}")
+    else:
+        export_expenses_csv(expenses, output)
+        print(f"Exported {len(expenses)} expenses to {output}")
 
 
 def cmd_income_add(store: ExpenseStore, args: argparse.Namespace) -> None:
@@ -317,7 +325,7 @@ def interactive(store: ExpenseStore) -> None:
             elif choice == "6":
                 path = prompt("Output file", "expenses.csv")
                 expenses = store.filter()
-                export_csv(expenses, Path(path))
+                export_expenses_csv(expenses, Path(path))
                 print(f"Exported {len(expenses)} expenses to {path}")
             elif choice in ("0", "q", "quit", "exit"):
                 return
@@ -381,9 +389,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     p.set_defaults(func=cmd_delete)
 
-    p = sub.add_parser("export", help="Export expenses to CSV")
-    p.add_argument("output", help="CSV file to write")
+    p = sub.add_parser("export", help="Export expenses to CSV, or expenses and income to Excel (.xlsx)")
+    p.add_argument("output", help="File to write: .csv, or .xlsx for a formatted Excel workbook")
     p.add_argument("-m", "--month", help="Only this month, YYYY-MM")
+    p.add_argument("--income", action="store_true", help="CSV: export income instead of expenses")
     p.set_defaults(func=cmd_export)
 
     p = sub.add_parser("income", help="Add or list income")

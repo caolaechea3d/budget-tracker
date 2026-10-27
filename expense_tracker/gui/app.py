@@ -18,6 +18,7 @@ from .. import APP_NAME
 from ..catalog import PALETTE, Category, Item, category_look, find_category, find_item
 from ..debts import DUE_SOON_DAYS, load_debts
 from ..debts import summarize as summarize_debts
+from ..exporter import export_expenses_csv, export_income_csv, export_xlsx
 from ..reports import balance, is_year, recent_tags
 from ..storage import (
     CURRENCIES,
@@ -27,7 +28,6 @@ from ..storage import (
     Income,
     RecurringExpense,
     add_months,
-    export_csv,
     format_money,
     format_rate,
     month_key,
@@ -47,10 +47,15 @@ from .tabs import (
     IncomeTab,
     PageData,
     RecurringTab,
+    ReportsTab,
 )
 from .widgets import MonthChoices, month_label, setup_style
 
 ALL = "All months"
+
+
+def _count(items: list, one: str, many: str) -> str:
+    return f"{len(items)} {one if len(items) == 1 else many}"
 
 
 class ExpenseApp(ttk.Frame):
@@ -91,10 +96,11 @@ class ExpenseApp(ttk.Frame):
         self.income_tab = IncomeTab(self)
         self.debts_tab = DebtsTab(self)
         self.charts_tab = ChartsTab(self)
+        self.reports_tab = ReportsTab(self)
         self.budgets_tab = BudgetsTab(self)
         self.recurring_tab = RecurringTab(self)
-        self.tabs = [self.expenses_tab, self.income_tab, self.debts_tab, self.charts_tab, self.budgets_tab,
-                     self.recurring_tab]
+        self.tabs = [self.expenses_tab, self.income_tab, self.debts_tab, self.charts_tab, self.reports_tab,
+                     self.budgets_tab, self.recurring_tab]
         self._build_status_bar()
 
         self.search_var.trace_add("write", lambda *_: self.refresh())
@@ -193,7 +199,14 @@ class ExpenseApp(ttk.Frame):
         menubar = tk.Menu(master)
         file_menu = tk.Menu(menubar, tearoff=False)
         file_menu.add_command(label="Import expenses from CSV…", command=self.import_csv)
+        file_menu.add_separator()
+        file_menu.add_command(label="Export to Excel…", command=self.export_excel)
         file_menu.add_command(label="Export shown expenses to CSV…", command=self.export)
+        file_menu.add_command(label="Export income to CSV…", command=self.export_income)
+        file_menu.add_command(label="Export daily expenses to Excel…",
+                              command=lambda: self.reports_tab.daily_view.export_excel())
+        file_menu.add_command(label="Save month in review as HTML…",
+                              command=lambda: self.reports_tab.review_view.save_html())
         file_menu.add_separator()
         file_menu.add_command(label="Back up now", command=self.backup_now)
         file_menu.add_command(label="Open data folder", command=self.open_data_folder)
@@ -452,18 +465,44 @@ class ExpenseApp(ttk.Frame):
 
     def export(self) -> None:
         shown = self.expenses_tab.shown
-        path = filedialog.asksaveasfilename(
-            title="Export expenses", defaultextension=".csv", filetypes=[("CSV files", "*.csv")],
-            initialfile=f"expenses-{self.selected_month() or 'all'}.csv",
-        )
+        self.export_file("Export expenses", "expenses", ".csv", lambda path: export_expenses_csv(shown, path),
+                     _count(shown, "expense", "expenses"))
+
+    def export_income(self) -> None:
+        shown = self.income_tab.shown
+        self.export_file("Export income", "income", ".csv", lambda path: export_income_csv(shown, path),
+                     _count(shown, "income entry", "income entries"))
+
+    def export_excel(self) -> None:
+        """The expenses as shown (with filters and sort order) and the income of the period."""
+        expenses, incomes = self.expenses_tab.shown, self.income_tab.shown
+        period = self.selected_month()
+        user = self.user.name if self.user else ""
+        self.export_file("Export to Excel", "budget", ".xlsx", lambda path: export_xlsx(
+            path, expenses, incomes, month_label(period) if period else ALL, user, self.expenses_tab.filter_summary(),
+        ), f"{_count(expenses, 'expense', 'expenses')} and {_count(incomes, 'income entry', 'income entries')}")
+
+    def export_file(self, title: str, name: str, extension: str, write: Callable[[str], None], what: str) -> None:
+        """Ask where to save ('<name>-<period><extension>' suggested), write the file, report how it went."""
+        kind =("Excel workbook", "*.xlsx") if extension == ".xlsx" else ("CSV files", "*.csv")
+        path = filedialog.asksaveasfilename(title=title, defaultextension=extension, filetypes=[kind],
+                                            initialfile=f"{name}-{self.selected_month() or 'all'}{extension}")
         if not path:
             return
         try:
-            export_csv(shown, path)
+            write(path)
+        except PermissionError:
+            messagebox.showerror("Could not export", f"Couldn't write to\n{path}\n\n"
+                                 "If that file is open in Excel, close it and try again.")
+            return
         except OSError as exc:
             messagebox.showerror("Could not export", str(exc))
             return
-        self.set_status(f"Exported {len(shown)} expenses to {path}")
+        except ImportError:  # running from source without the packages in requirements.txt
+            messagebox.showerror("Could not export", "Excel export needs the openpyxl package:\n"
+                                 "pip install -r requirements.txt")
+            return
+        self.set_status(f"Exported {what} to {path}")
 
     def backup_now(self) -> None:
         try:
