@@ -189,7 +189,10 @@ class ExpensesTab(Tab):
         self.summary.tag_configure("sub", foreground="#4b5563")
         self.summary.tag_configure("over", foreground="#c0392b")
         self.summary.tag_configure("warning", foreground="#b35c00")
+        scroll = ttk.Scrollbar(right, orient="vertical", command=self.summary.yview)
+        self.summary.configure(yscrollcommand=scroll.set)
         self.summary.grid(row=0, column=0, sticky="nsew")
+        scroll.grid(row=0, column=1, sticky="ns")
         return right
 
     # ---------- filters ----------

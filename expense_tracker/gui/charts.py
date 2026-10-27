@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import tkinter as tk
+from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
 
@@ -35,37 +36,73 @@ def _short(value: float) -> str:
     return f"{value:.0f}"
 
 
+OTHERS_TAG, BACK_TAG = "others", "back"  # canvas tags for the clickable parts
+OTHERS_COLOR = "#c0c4cc"
+LINK = "#1d6fb8"
+
+
+def _clickable(canvas: tk.Canvas, tag: str, action: Callable[[], None]) -> None:
+    """Make every canvas item with `tag` clickable, with a hand cursor on hover."""
+    canvas.tag_bind(tag, "<Button-1>", lambda _e: action())
+    canvas.tag_bind(tag, "<Enter>", lambda _e: canvas.configure(cursor="hand2"))
+    canvas.tag_bind(tag, "<Leave>", lambda _e: canvas.configure(cursor=""))
+
+
 def draw_donut(
     canvas: tk.Canvas,
     slices: list[tuple[str, Decimal, str, object]],
     center_title: str,
     center_value: str,
     empty_text: str = "No expenses in this period",
+    on_open_others: Callable[[], None] | None = None,
+    back_text: str | None = None,
+    on_back: Callable[[], None] | None = None,
 ) -> None:
-    """slices: (label, value, color, icon image or None), largest first."""
+    """slices: (label, value, color, icon image or None), largest first.
+
+    With more than MAX_SLICES slices, the smallest are grouped as "Others"; clicking that slice or
+    its legend row calls `on_open_others`. `back_text` + `on_back` draw a link above the chart.
+    """
     canvas.delete("all")
+    canvas.configure(cursor="")
+    for tag in (OTHERS_TAG, BACK_TAG):  # bindings outlive the items; start clean every time
+        for sequence in ("<Button-1>", "<Enter>", "<Leave>"):
+            canvas.tag_unbind(tag, sequence)
     width, height = canvas.winfo_width(), canvas.winfo_height()
     if width < 50 or height < 50:
         return
+    top = 0
+    if back_text and on_back:
+        canvas.create_text(16, 12, text=back_text, anchor="w", fill=LINK, font=FONT, tags=(BACK_TAG,))
+        _clickable(canvas, BACK_TAG, on_back)
+        top = 24
     total = sum((s[1] for s in slices), Decimal("0"))
     if total <= 0:
         canvas.create_text(width / 2, height / 2, text=empty_text, fill=MUTED, font=FONT)
         return
 
-    if len(slices) > MAX_SLICES:
-        rest = sum((s[1] for s in slices[MAX_SLICES - 1:]), Decimal("0"))
-        slices = [*slices[:MAX_SLICES - 1], ("Others", rest, "#c0c4cc", None)]
+    grouped = len(slices) > MAX_SLICES
+    if grouped:
+        hidden = slices[MAX_SLICES - 1:]
+        rest = sum((s[1] for s in hidden), Decimal("0"))
+        label = f"Others ({len(hidden)}) ▸" if on_open_others else f"Others ({len(hidden)})"
+        slices = [*slices[:MAX_SLICES - 1], (label, rest, OTHERS_COLOR, None)]
+        if on_open_others:
+            _clickable(canvas, OTHERS_TAG, on_open_others)
 
-    size = min(height - 20, width * 0.5)
-    x0, y0 = 16, (height - size) / 2
+    def tags_for(index: int) -> tuple[str, ...]:
+        return (OTHERS_TAG,) if grouped and index == len(slices) - 1 else ()
+
+    size = min(height - 20 - top, width * 0.5)
+    x0, y0 = 16, top + (height - top - size) / 2
     start = 90.0
-    for label, value, color, _ in slices:
+    for i, (label, value, color, _) in enumerate(slices):
         extent = -float(value / total) * 360
         if abs(extent) >= 359.99:
-            canvas.create_oval(x0, y0, x0 + size, y0 + size, fill=color, outline="")
+            canvas.create_oval(x0, y0, x0 + size, y0 + size, fill=color, outline="", tags=tags_for(i))
         else:
             canvas.create_arc(x0, y0, x0 + size, y0 + size, start=start, extent=extent,
-                              fill=color, outline=canvas["background"], width=2)
+                              fill=color, outline=canvas["background"], width=2, tags=tags_for(i))
         start += extent
     hole = size * 0.58
     cx, cy = x0 + size / 2, y0 + size / 2
@@ -77,17 +114,23 @@ def draw_donut(
     # Legend
     lx = x0 + size + 24
     row_h = 26
-    ly = max(10, (height - row_h * len(slices)) / 2)
+    ly = max(top + 10, top + (height - top - row_h * len(slices)) / 2)
     for i, (label, value, color, image) in enumerate(slices):
         y = ly + i * row_h + row_h / 2
-        canvas.create_rectangle(lx, y - 5, lx + 10, y + 5, fill=color, outline="")
+        tags = tags_for(i)
+        if tags:  # an invisible box over the whole row, so the gaps are clickable too
+            canvas.create_rectangle(lx - 4, y - row_h / 2, width - 6, y + row_h / 2, fill=canvas["background"],
+                                    outline="", tags=tags)
+        canvas.create_rectangle(lx, y - 5, lx + 10, y + 5, fill=color, outline="", tags=tags)
         tx = lx + 16
         if image is not None:
-            canvas.create_image(tx, y, image=image, anchor="w")
+            canvas.create_image(tx, y, image=image, anchor="w", tags=tags)
             tx += int(image.width()) + 6
         pct = float(value / total * 100)
-        canvas.create_text(tx, y, text=label, anchor="w", fill=TEXT, font=FONT)
-        canvas.create_text(width - 12, y, text=f"{value:,.2f}   {pct:4.1f}%", anchor="e", fill=MUTED, font=FONT)
+        canvas.create_text(tx, y, text=label, anchor="w", fill=LINK if tags and on_open_others else TEXT,
+                           font=FONT, tags=tags)
+        canvas.create_text(width - 12, y, text=f"{value:,.2f}   {pct:4.1f}%", anchor="e", fill=MUTED, font=FONT,
+                           tags=tags)
 
 
 def draw_bars(

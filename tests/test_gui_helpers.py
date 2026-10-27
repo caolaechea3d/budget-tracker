@@ -118,6 +118,30 @@ class GuiHelpersTest(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_donut_groups_others_and_makes_it_clickable(self):
+        import tkinter as tk
+        from expense_tracker.gui.charts import BACK_TAG, MAX_SLICES, OTHERS_TAG, draw_donut
+        root = hidden_root(self)
+        try:
+            canvas = tk.Canvas(root, width=600, height=400)
+            # The test window is hidden, so the canvas has no real size yet; tell the chart its size.
+            canvas.winfo_width, canvas.winfo_height = (lambda: 600), (lambda: 400)
+            slices = [(f"Cat {i}", D(100 - i), "#888888", None) for i in range(MAX_SLICES + 3)]
+            opened = []
+            draw_donut(canvas, slices, "Total", "S/ 1", on_open_others=lambda: opened.append(1))
+            texts = [canvas.itemcget(i, "text") for i in canvas.find_withtag(OTHERS_TAG) if canvas.type(i) == "text"]
+            self.assertEqual(texts[0], "Others (4) ▸")  # the 4 smallest are grouped
+            self.assertTrue(canvas.find_withtag(OTHERS_TAG))
+            self.assertEqual(canvas.find_withtag(BACK_TAG), ())
+            self.assertIn("<Button-1>", canvas.tag_bind(OTHERS_TAG))
+            # Few enough slices: nothing grouped, and old click bindings are gone
+            draw_donut(canvas, slices[:3], "Total", "S/ 1", back_text="◀ All categories", on_back=lambda: None)
+            self.assertEqual(canvas.find_withtag(OTHERS_TAG), ())
+            self.assertEqual(canvas.tag_bind(OTHERS_TAG), ())
+            self.assertTrue(canvas.find_withtag(BACK_TAG))
+        finally:
+            root.destroy()
+
     def test_preview(self):
         self.assertEqual(preview_text("20", "USD", "3.75"), "= S/ 75.00  /  US$ 20.00")
         self.assertEqual(preview_text("20", "USD", ""), "")
