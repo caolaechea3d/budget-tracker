@@ -211,6 +211,35 @@ class RecurringTest(StoreTestCase):
         self.assertEqual(len(self.store.due_recurring(date(2026, 9, 28))), 1)
         self.assertEqual(self.store.last_rate(), D("3.7"))
 
+    def test_pay_early(self):
+        rent = RecurringExpense(D("1200"), "Housing", subcategory="Rent", day=1, start_month="2026-11",
+                                handled_through="2026-11", payment_method="Bank transfer")
+        self.store.save_recurring(rent)
+        month = rent.next_month()
+        self.assertEqual(month, "2026-12")
+        # Paid a week before it's due: dated the day it's paid, with whatever was changed in the dialog
+        expense = rent.to_expense(month, D("3.74"))
+        expense.date, expense.description = date(2026, 11, 24), "Rent (December 2026)"
+        self.store.pay_recurring(expense, month)
+        [saved] = self.store.load()
+        self.assertEqual((saved.date, saved.amount, saved.category, saved.subcategory, saved.payment_method,
+                          saved.recurring_id), (date(2026, 11, 24), D("1200.00"), "Housing", "Rent", "Bank transfer",
+                                                rent.id))
+        # December is handled: not asked for on the 1st; January still is
+        [template] = self.store.recurring()
+        self.assertEqual(template.handled_through, "2026-12")
+        self.assertEqual(self.store.due_recurring(date(2026, 12, 1)), [])
+        self.assertEqual([m for _, m in self.store.due_recurring(date(2027, 1, 1))], ["2027-01"])
+        self.assertEqual(self.store.last_rate(), D("3.74"))
+        # Paying an earlier month again never moves "handled" backwards
+        self.store.pay_recurring(rent.to_expense("2026-10", D("3.74")), "2026-10")
+        self.assertEqual(self.store.recurring()[0].handled_through, "2026-12")
+        gone = rent.to_expense("2027-01", D("3.7"))
+        gone.recurring_id = "deleted"
+        with self.assertRaises(ValueError):
+            self.store.pay_recurring(gone, "2027-01")
+        self.assertEqual(len(self.store.load()), 2)  # nothing added for the deleted one
+
     def test_paused_and_day_validation(self):
         r = RecurringExpense(D("5"), "Other", day=1, start_month="2026-01", active=False)
         self.assertEqual(r.due_months(date(2026, 9, 1)), [])

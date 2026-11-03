@@ -778,6 +778,20 @@ class ExpenseStore:
         self._write(doc)
         return created
 
+    def pay_recurring(self, expense: Expense, month: str) -> None:
+        """Add `month`'s payment of the recurring expense `expense.recurring_id` now (e.g. a week before
+        it's due), and count that month as handled so it isn't offered again when its day comes."""
+        doc = self._read()
+        template = next((r for r in doc.get("recurring", []) if r["id"] == expense.recurring_id), None)
+        if template is None:
+            raise ValueError("This recurring expense no longer exists")
+        if not template.get("handled_through") or month > template["handled_through"]:
+            template["handled_through"] = month
+        doc.setdefault("expenses", []).append(expense.to_dict())
+        if expense.rate is not None:
+            doc.setdefault("settings", {})["last_rate"] = str(expense.rate)
+        self._write(doc)
+
     # --- receipts ---
 
     def attach_receipt(self, expense_id: str, source: str | Path) -> Expense:

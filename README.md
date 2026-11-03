@@ -31,11 +31,12 @@ click **More info → Run anyway**.
   when needed (0 allowed). Progress bars turn orange at 80% and red when you go over.
 - **Debts** — money you owe and money others owe you, with optional deadlines or monthly
   installments ("cuotas"), payment history, and reminders when something is due or overdue.
-- **Recurring expenses** — rent, subscriptions and bills, offered for adding each month.
+- **Recurring expenses** — rent, subscriptions and bills, offered for adding each month; or paid
+  early with "Pay now…", added on the day you pay and not asked for again when due.
 - **Charts** — spending by category and income vs. expenses over the last 12 months.
 - **Daily expenses** — a table with a block per day: every category side by side with its items,
   descriptions and amounts, and the day's sums. Double-click an expense to edit it; export it to
-  Excel with the same layout.
+  Excel, with the categories once in a bar at the top and only the details below.
 - **Month in review** — how a month went compared with a usual month: what stood out (big
   changes, unusually large expenses, possible duplicates), spending by category, biggest expenses,
   budgets and debts, plus where the current month is heading. Saved as a printable web page.

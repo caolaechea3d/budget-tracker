@@ -398,7 +398,8 @@ class RecurringDialog(Dialog):
         MonthChoices(month_box, self.start_var).set_months(months)
         labeled(b, 8, "", ttk.Checkbutton(b, text="Active", variable=self.active_var))
         ttk.Label(b, text="The app asks you to add it each month once its day arrives.\n"
-                          "The exchange rate is asked for at that moment.",
+                          "The exchange rate is asked for at that moment. To pay one early,\n"
+                          "select it in the Recurring tab and click “Pay now…”.",
                   style="Muted.TLabel").grid(row=9, column=0, columnspan=2, sticky="w", pady=(6, 0))
         self.show(amount)
 
@@ -481,6 +482,61 @@ class DueRecurringDialog(Dialog):
             lambda: self.app.store.apply_recurring(add, skip, rate),
         )
         self.app.recurring_applied(created, len(skip))
+        return True
+
+
+class PayRecurringDialog(Dialog):
+    """Pay the next month of a recurring expense now — e.g. a week before it's due. It's added to the
+    expenses on the day it's paid, and that month isn't offered again when its day comes."""
+
+    def __init__(self, app: ExpenseApp, item: RecurringExpense):
+        self.app = app
+        self.item = item
+        self.month = item.next_month()
+        super().__init__(app, "Pay a recurring expense now", ok_text="Add to expenses")
+        b = self.body
+        b.columnconfigure(1, weight=1)
+        name = item.description or item.subcategory or item.category
+        due = item.occurrence_date(self.month)
+        days = (due - date.today()).days
+        when = (f"in {days} day{'s' * (days != 1)}" if days > 0 else "today" if days == 0
+                else f"{-days} day{'s' * (days != -1)} ago")
+        icon, color = app.look(item.category, item.subcategory)
+        image = app.icons.get(icon, color)
+        title = f"{name} for {month_label(self.month)}"
+        ttk.Label(b, image=image or "", compound="left", style="Bold.TLabel",
+                  text=f" {title}" if image else app.icons.text(icon, title)).grid(
+            row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(b, text=f"Due {due.day} {due:%b %Y} ({when})", style="Muted.TLabel").grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+        self.date_var = tk.StringVar(value=date.today().isoformat())
+        self.money = MoneyFields(b, amount=f"{item.amount:.2f}", currency=item.currency, rate=_rate_text(app.last_rate()))
+        self.description_var = tk.StringVar(value=f"{name} ({month_label(self.month)})")
+        labeled(b, 2, "Paid on", DateField(b, self.date_var, width=12, icons=app.icons))
+        labeled(b, 3, "Amount", self.money.amount)
+        labeled(b, 4, "Currency", self.money.currency)
+        labeled(b, 5, "Rate (S/ per US$1)", self.money.rate)
+        self.money.preview.grid(row=6, column=1, sticky="w")
+        labeled(b, 7, "Description", ttk.Entry(b, textvariable=self.description_var, width=38), sticky="ew")
+        ttk.Label(b, text=f"It's added to your expenses on the day you pay it, so it counts in that month's\n"
+                          f"spending and budgets. {month_label(self.month)} won't be asked for again when it's due.",
+                  style="Muted.TLabel").grid(row=8, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.show(self.money.amount if self.money.rate_var.get() else self.money.rate)
+
+    def on_ok(self) -> bool:
+        item, month = self.item, self.month
+        try:
+            expense = item.to_expense(month, _required_rate(self.money.rate_var.get()))
+            expense.date = parse_date(self.date_var.get().strip())
+            expense.amount = parse_amount(self.money.amount_var.get())
+            expense.currency = parse_currency(self.money.currency_var.get())
+            expense.description = self.description_var.get().strip()
+            self.app.history.record(f"Pay {short_name(expense)}", lambda: self.app.store.pay_recurring(expense, month))
+        except ValueError as exc:
+            messagebox.showerror("Invalid payment", str(exc), parent=self)
+            return False
+        self.app.expense_saved(expense, f"Paid ahead for {month_label(month)}:")
         return True
 
 

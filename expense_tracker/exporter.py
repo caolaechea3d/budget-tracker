@@ -211,7 +211,8 @@ def export_xlsx(
 
 # ---------- daily expenses table (Excel) ----------
 
-DAILY_FIRST_ROW = 4  # rows 1-2: title and notes
+DAILY_BAR_ROW = 4  # rows 1-2: title and notes; row 4: the categories; then the days
+BAR_FILL = "F3F4F6"
 
 
 def _outline(ws, top: int, left: int, bottom: int, right: int, side) -> None:
@@ -225,9 +226,15 @@ def _outline(ws, top: int, left: int, bottom: int, right: int, side) -> None:
                                  top=side if row == top else old.top, bottom=side if row == bottom else old.bottom)
 
 
+def _sum_of(cells: list[str]) -> str:
+    """'=SUM(D7,D12,…)', split into several SUMs when needed (Excel takes 255 arguments at most)."""
+    return "=" + "+".join(f"SUM({','.join(cells[i:i + 255])})" for i in range(0, len(cells), 255))
+
+
 def export_daily_xlsx(path: Path, table: DailyTable, title: str, colors: dict[str, str], note: str = "") -> None:
-    """The daily expenses table as in the app: a block per day, each category with item, description and
-    amount, and a yellow sums row (with formulas, so the sums follow any change made in Excel)."""
+    """The daily expenses table: one bar at the top with the categories (each over its item, description
+    and amount columns), then a block per day with just the details and a yellow row with the day's sums.
+    The sums are formulas, so they follow any change made in Excel."""
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
@@ -242,11 +249,15 @@ def export_daily_xlsx(path: Path, table: DailyTable, title: str, colors: dict[st
     ws["A2"] = " · ".join(filter(None, [note, f"Amounts in {table.currency}",
                                         f"Exported {today.day} {today:%b %Y} with {APP_NAME}"]))
     ws["A2"].font = Font(size=9, color=MUTED)
+    if not table.days:
+        ws.cell(DAILY_BAR_ROW, 1, "No expenses in this period").font = Font(italic=True, color=MUTED)
+        wb.save(path)
+        return
 
     money = f'"{SYMBOLS[table.currency]}" #,##0.00'
     day_fill = PatternFill("solid", fgColor=DAY_FILL[1:].upper())
     thick, thin = Side(style="medium", color="333333"), Side(style="thin", color="333333")
-    bold, right = Font(bold=True), Alignment(horizontal="right")
+    bold, left, right = Font(bold=True), Alignment(horizontal="left"), Alignment(horizontal="right")
     first_col = {cat: 2 + 3 * i for i, cat in enumerate(table.categories)}  # each category: item, description, amount
     total_col = 2 + 3 * len(table.categories)
     widths = {1: 19, total_col: 13}  # A: bold "2026-10-07 (Wed)"
@@ -254,68 +265,79 @@ def export_daily_xlsx(path: Path, table: DailyTable, title: str, colors: dict[st
     def width(col: int, text: str, cap: int = 40) -> None:
         widths[col] = min(cap, max(widths.get(col, 6), len(text) + 2))
 
-    row = DAILY_FIRST_ROW
+    # The bar: each category's name over its three columns, in its color
+    bar = DAILY_BAR_ROW
+    for col, text in ((1, "Date"), (total_col, "Day total")):
+        cell = ws.cell(bar, col, text)
+        cell.font, cell.fill = bold, PatternFill("solid", fgColor=BAR_FILL)
+        cell.alignment = left if col == 1 else right
+        _outline(ws, bar, col, bar, col, thick)
+    for cat, col in first_col.items():
+        ws.merge_cells(start_row=bar, start_column=col, end_row=bar, end_column=col + 2)
+        cell = ws.cell(bar, col, cat)
+        cell.font, cell.alignment = bold, Alignment(horizontal="center")
+        cell.fill = PatternFill("solid", fgColor=header_color(colors.get(cat, "#8d99ae"))[1:].upper())
+        _outline(ws, bar, col, bar, col + 2, thick)
+
+    # A block per day: the items, then the sums row; the date on the first row and on the sums row
+    row, sums_rows = bar + 1, []
     for day in table.days:
-        header, footer = row, row + max(day.rows, 1) + 1
-        for r in (header, footer):
+        first, sums = row, row + max(day.rows, 1)
+        for r in (first, sums):
             cell = ws.cell(r, 1, day.day)
-            cell.number_format, cell.font, cell.fill = "yyyy-mm-dd (ddd)", bold, day_fill
-            cell.alignment = Alignment(horizontal="left")
+            cell.number_format, cell.font, cell.fill, cell.alignment = "yyyy-mm-dd (ddd)", bold, day_fill, left
         for col in range(2, total_col + 1):
-            ws.cell(footer, col).fill = day_fill
+            ws.cell(sums, col).fill = day_fill
         for cat, col in first_col.items():
             amount_col = col + 2
-            cell = ws.cell(header, amount_col, cat)
-            cell.font, cell.alignment = bold, right
-            cell.fill = PatternFill("solid", fgColor=header_color(colors.get(cat, "#8d99ae"))[1:].upper())
-            width(amount_col, cat)
             items = day.items.get(cat, [])
-            for i, e in enumerate(items, start=1):
-                ws.cell(header + i, col, e.subcategory or None)
-                ws.cell(header + i, col + 1, e.description or None)
+            for i, e in enumerate(items):
+                ws.cell(first + i, col, e.subcategory or None)
+                ws.cell(first + i, col + 1, e.description or None)
                 value = e.amount_in(table.currency)
-                cell = ws.cell(header + i, amount_col, value if value is not None else amount_text(e, table.currency))
+                cell = ws.cell(first + i, amount_col, value if value is not None else amount_text(e, table.currency))
                 cell.number_format = money
                 width(col, e.subcategory)
                 width(col + 1, e.description)
                 width(amount_col, amount_text(e, table.currency))
             if items:
                 letter = get_column_letter(amount_col)
-                cell = ws.cell(footer, amount_col, f"=SUM({letter}{header + 1}:{letter}{footer - 1})")
+                cell = ws.cell(sums, amount_col, f"=SUM({letter}{first}:{letter}{sums - 1})")
                 cell.number_format, cell.font = money, bold
-            _outline(ws, header, col, footer, amount_col, thick)
-        cell = ws.cell(header, total_col, "Day total")
-        cell.font, cell.alignment = Font(color=MUTED), right
-        sums = ",".join(f"{get_column_letter(col + 2)}{footer}" for cat, col in first_col.items() if cat in day.items)
-        cell = ws.cell(footer, total_col, f"=SUM({sums})")
+            _outline(ws, first, col, sums, amount_col, thick)
+        cell = ws.cell(sums, total_col,
+                       _sum_of([f"{get_column_letter(c + 2)}{sums}" for cat, c in first_col.items() if cat in day.items]))
         cell.number_format, cell.font = money, bold
-        _outline(ws, header, 1, footer, 1, thick)
-        _outline(ws, header, total_col, footer, total_col, thick)
+        _outline(ws, first, 1, sums, 1, thick)
+        _outline(ws, first, total_col, sums, total_col, thick)
         for col in range(1, total_col + 1):  # the line above the sums
-            cell, old = ws.cell(footer, col), ws.cell(footer, col).border
+            cell, old = ws.cell(sums, col), ws.cell(sums, col).border
             cell.border = Border(left=old.left, right=old.right, top=thin, bottom=old.bottom)
-        row = footer + 1
+        sums_rows.append(sums)
+        row = sums + 1
 
-    if table.days:
-        # Totals: column A only holds dates on the days' first and sums rows, and the first row's
-        # amount cells hold category names (text, which SUMIF skips): so this adds up the daily sums.
-        last, row = row - 1, row + 1
-        total_fill = PatternFill("solid", fgColor=DAILY_TOTAL_FILL[1:].upper())
-        for col in range(1, total_col + 1):
-            ws.cell(row, col).fill = total_fill
-        ws.cell(row, 1, "Total").font = bold
-        for col in (*(c + 2 for c in first_col.values()), total_col):
-            letter = get_column_letter(col)
-            cell = ws.cell(row, col, f'=SUMIF($A${DAILY_FIRST_ROW}:$A${last},"<>",{letter}{DAILY_FIRST_ROW}:{letter}{last})')
-            cell.number_format, cell.font = money, bold
-        _outline(ws, row, 1, row, total_col, thick)
-    else:
-        ws.cell(DAILY_FIRST_ROW, 1, "No expenses in this period").font = Font(italic=True, color=MUTED)
+    # Totals (after a blank row): each category's daily sums added up
+    row += 1
+    total_fill = PatternFill("solid", fgColor=DAILY_TOTAL_FILL[1:].upper())
+    for col in range(1, total_col + 1):
+        ws.cell(row, col).fill = total_fill
+    ws.cell(row, 1, "Total").font = bold
+    for cat, col in first_col.items():
+        letter = get_column_letter(col + 2)
+        cell = ws.cell(row, col + 2, _sum_of([f"{letter}{r}" for day, r in zip(table.days, sums_rows)
+                                              if cat in day.items]))
+        cell.number_format, cell.font = money, bold
+    letter = get_column_letter(total_col)
+    cell = ws.cell(row, total_col, _sum_of([f"{letter}{r}" for r in sums_rows]))
+    cell.number_format, cell.font = money, bold
+    _outline(ws, row, 1, row, total_col, thick)
 
     for col, w in widths.items():
         ws.column_dimensions[get_column_letter(col)].width = w
-    ws.freeze_panes = "B1"  # dates stay in view when scrolling sideways
+    ws.freeze_panes = ws.cell(bar + 1, 2)  # the bar and the dates stay in view while scrolling
+    ws.print_title_rows = f"{bar}:{bar}"  # and the bar is repeated on every printed page
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = 1, 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     wb.save(path)
+

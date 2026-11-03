@@ -5,7 +5,7 @@ from __future__ import annotations
 from tkinter import messagebox, ttk
 
 from ...storage import RecurringExpense, format_money
-from ..forms import RecurringDialog
+from ..forms import PayRecurringDialog, RecurringDialog
 from .base import PageData, Tab
 
 
@@ -23,7 +23,8 @@ class RecurringTab(Tab):
                   style="Muted.TLabel").pack(side="left")
         for text, command in (("Check what's due", lambda: self.app.check_recurring(manual=True)),
                               ("Delete", self.delete_selected), ("Pause / resume", self.toggle_selected),
-                              ("Edit…", self.edit_selected), ("New…", lambda: RecurringDialog(self.app))):
+                              ("Pay now…", self.pay_selected), ("Edit…", self.edit_selected),
+                              ("New…", lambda: RecurringDialog(self.app))):
             ttk.Button(top, text=text, command=command).pack(side="right", padx=(6, 0))
         self.tree = ttk.Treeview(self, columns=("amount", "category", "day", "payment", "next", "status"),
                                  show="tree headings", selectmode="browse")
@@ -63,6 +64,14 @@ class RecurringTab(Tab):
         item = self._selected()
         if item:
             RecurringDialog(self.app, item)
+
+    def pay_selected(self) -> None:
+        """Pay the next month now, e.g. a week before it's due."""
+        item = self._selected()
+        if item is None:
+            self.app.set_status("Select a recurring expense to pay it now.")
+        else:
+            PayRecurringDialog(self.app, item)
 
     def toggle_selected(self) -> None:
         item = self._selected()

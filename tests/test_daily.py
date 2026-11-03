@@ -66,11 +66,13 @@ class DailyExcelTest(unittest.TestCase):
         self.assertEqual(ws["A1"].value, "Daily expenses — October 2026")
         self.assertTrue(ws["A2"].value.startswith("Ana · Amounts in PEN · Exported "))
         # Columns: A date | B-D Transport | E-G Food | H-J Books | K-M Zoo | N day total
-        # 3 October: header row 4, two item rows (Food has two), sums row 7
-        self.assertEqual((ws["A4"].value.date(), ws["A4"].number_format), (date(2026, 10, 3), "yyyy-mm-dd (ddd)"))
-        self.assertEqual([ws.cell(4, c).value for c in (4, 7, 10, 13, 14)],
-                         ["Transport", "Food", "Books", "Zoo", "Day total"])
-        self.assertEqual(ws["G4"].fill.fgColor.rgb, "00F5C5B9")  # Food's color, lightened
+        # Row 4, the bar: each category once, over its three columns
+        self.assertEqual([ws.cell(4, c).value for c in (1, 2, 5, 8, 11, 14)],
+                         ["Date", "Transport", "Food", "Books", "Zoo", "Day total"])
+        self.assertIn("E4:G4", {str(r) for r in ws.merged_cells.ranges})
+        self.assertEqual(ws["E4"].fill.fgColor.rgb, "00F5C5B9")  # Food's color, lightened
+        # 3 October: two item rows (Food has two) and its sums row 7; no category names repeated
+        self.assertEqual((ws["A5"].value.date(), ws["A5"].number_format), (date(2026, 10, 3), "yyyy-mm-dd (ddd)"))
         self.assertEqual([ws.cell(5, c).value for c in range(5, 8)], ["Coffee", "Espresso", 8.5])
         self.assertEqual([ws.cell(6, c).value for c in range(5, 8)], ["Restaurant", "Menu del día", 18])
         self.assertEqual((ws["B5"].value, ws["C5"].value, ws["D5"].value), ("Taxi", "To the market", 12))
@@ -78,14 +80,23 @@ class DailyExcelTest(unittest.TestCase):
                          (date(2026, 10, 3), "=SUM(D5:D6)", "=SUM(G5:G6)", None))  # nothing in Books that day
         self.assertEqual(ws["N7"].value, "=SUM(D7,G7)")
         self.assertEqual(ws["A7"].fill.fgColor.rgb, "00FFF176")
-        # 4 October: one expense per category, so rows 8-10; one without a rate shows its own amount as text
-        self.assertEqual(ws["J9"].value, "US$ 5.00 (no rate)")
-        self.assertEqual(ws["M9"].value, 37.5)
-        self.assertEqual(ws["A10"].value.date(), date(2026, 10, 4))
-        # Totals, after a blank row: the daily sums (column A only has dates on the days' first and sums rows)
-        self.assertEqual((ws["A11"].value, ws["A12"].value), (None, "Total"))
-        self.assertEqual(ws["G12"].value, '=SUMIF($A$4:$A$10,"<>",G4:G10)')
-        self.assertEqual(ws.freeze_panes, "B1")
+        # 4 October: one expense per category, so one item row (8) and the sums row (9); an expense
+        # without a rate shows its own amount as text
+        self.assertEqual((ws["A8"].value.date(), ws["A9"].value.date()), (date(2026, 10, 4), date(2026, 10, 4)))
+        self.assertEqual((ws["J8"].value, ws["M8"].value), ("US$ 5.00 (no rate)", 37.5))
+        values = [ws.cell(r, c).value for r in range(5, 10) for c in range(2, 15)]
+        self.assertEqual([v for v in values if v in table.categories], [])
+        # Totals, after a blank row: each category's daily sums added up
+        self.assertEqual((ws["A10"].value, ws["A11"].value), (None, "Total"))
+        self.assertEqual((ws["G11"].value, ws["D11"].value, ws["N11"].value),
+                         ("=SUM(G7,G9)", "=SUM(D7)", "=SUM(N7,N9)"))
+        self.assertEqual((ws.freeze_panes, ws.print_title_rows), ("B5", "$4:$4"))  # bar repeated when printing
+
+    def test_long_periods_split_the_totals(self):
+        from expense_tracker.exporter import _sum_of
+        self.assertEqual(_sum_of(["D7", "D9"]), "=SUM(D7,D9)")
+        cells = [f"D{r}" for r in range(300)]
+        self.assertEqual(_sum_of(cells), f"=SUM({','.join(cells[:255])})+SUM({','.join(cells[255:])})")
 
 
 if __name__ == "__main__":
