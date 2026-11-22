@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import tkinter as tk
+import tkinter.font as tkfont
 from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
@@ -131,6 +132,61 @@ def draw_donut(
                            font=FONT, tags=tags)
         canvas.create_text(width - 12, y, text=f"{value:,.2f}   {pct:4.1f}%", anchor="e", fill=MUTED, font=FONT,
                            tags=tags)
+
+
+def draw_week_bars(
+    canvas: tk.Canvas,
+    labels: list[str],
+    values: list[Decimal],
+    color: str,
+    average: Decimal | None = None,
+    partial: int | None = None,
+) -> None:
+    """One bar per week (oldest on the left), a dashed line at `average`, and the bar at index
+    `partial` (the current week, so far) drawn lighter."""
+    canvas.delete("all")
+    width, height = canvas.winfo_width(), canvas.winfo_height()
+    if width < 80 or height < 80 or not values:
+        return
+    label_lines = 2 if partial is not None else 1  # "so far" goes under the current week's date
+    left, right, top = 48, 12, 22
+    bottom = 10 + label_lines * tkfont.Font(root=canvas, font=FONT).metrics("linespace")
+    plot_w, plot_h = width - left - right, height - top - bottom
+    maximum = max([float(v) for v in values] + [float(average or 0)])
+    step = _nice_step(maximum)
+    top_value = step * max(1, math.ceil(maximum / step)) if maximum > 0 else step * 4
+
+    def y_of(value: float) -> float:
+        return top + plot_h - plot_h * value / top_value
+
+    for i in range(int(round(top_value / step)) + 1):
+        y = y_of(step * i)
+        canvas.create_line(left, y, width - right, y, fill=GRID)
+        canvas.create_text(left - 6, y, text=_short(step * i), anchor="e", fill=MUTED, font=FONT)
+    group = plot_w / len(values)
+    bar = min(40, group * 0.7)
+    every = max(1, math.ceil(len(values) / 13))  # label every week when there's room, else every few
+    for i, (label, value) in enumerate(zip(labels, values)):
+        x = left + i * group + (group - bar) / 2
+        if value > 0:
+            if i == partial:
+                canvas.create_rectangle(x, y_of(float(value)), x + bar, top + plot_h, fill="", outline=color,
+                                        width=2, dash=(4, 2))
+            else:
+                canvas.create_rectangle(x, y_of(float(value)), x + bar, top + plot_h, fill=color, outline="")
+            if len(values) <= 16:
+                canvas.create_text(x + bar / 2, y_of(float(value)) - 3, text=_short(float(value)), anchor="s",
+                                   fill=TEXT, font=FONT)
+        if (len(values) - 1 - i) % every == 0:  # always label the latest week
+            canvas.create_text(left + i * group + group / 2, top + plot_h + 6, anchor="n", font=FONT,
+                               text=label + ("\nso far" if i == partial else ""), fill=TEXT if i == partial else MUTED,
+                               justify="center")
+    canvas.create_line(left, top + plot_h, width - right, top + plot_h, fill="#9ca3af")
+    if average is not None and average > 0:
+        y = y_of(float(average))
+        canvas.create_line(left, y, width - right, y, fill=TEXT, dash=(6, 4))
+        canvas.create_text(width - right, y - 3, text=f"average {_short(float(average))}", anchor="se",
+                           fill=TEXT, font=FONT)
 
 
 def draw_bars(

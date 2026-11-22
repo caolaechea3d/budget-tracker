@@ -37,6 +37,9 @@ click **More info → Run anyway**.
 - **Daily expenses** — a table with a block per day: every category side by side with its items,
   descriptions and amounts, and the day's sums. Double-click an expense to edit it; export it to
   Excel, with the categories once in a bar at the top and only the details below.
+- **Weekly spending** — weeks (Monday to Sunday) compared side by side: this week so far, last
+  week, the average and highest week, a bar chart with the average, and a table of the weeks with
+  each category's spending.
 - **Month in review** — how a month went compared with a usual month: what stood out (big
   changes, unusually large expenses, possible duplicates), spending by category, biggest expenses,
   budgets and debts, plus where the current month is heading. Saved as a printable web page.
@@ -70,6 +73,7 @@ expense_tracker/
   undo.py         undo/redo history
   reports.py      totals, comparisons, budget status, search
   daily.py        the daily expenses table
+  weekly.py       weekly spending
   review.py       the month in review (calculations and wording)
   review_html.py  the month in review as a printable HTML page
   importer.py     bank-statement CSV import

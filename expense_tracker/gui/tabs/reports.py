@@ -1,5 +1,5 @@
-"""Reports tab: the daily expenses table (daily.py) and the month in review — how the month went,
-what changed, where it's heading."""
+"""Reports tab: the daily expenses table (daily.py), weekly spending (weekly.py) and the month in
+review — how the month went, what changed, where it's heading."""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ from ..forms import open_file
 from ..widgets import ScrollableFrame, month_label, progress_bar
 from .base import EXPENSE_COLOR, INCOME_COLOR, LEVEL_COLORS, PageData, Tab
 from .daily import DailyExpensesView
+from .weekly import WeeklyView
 
 if TYPE_CHECKING:
     from ..app import ExpenseApp
@@ -52,16 +53,18 @@ class ReportsTab(Tab):
         self.views = ttk.Notebook(self)
         self.views.grid(row=0, column=0, sticky="nsew")
         self.daily_view = DailyExpensesView(self.views, self.app)
+        self.weekly_view = WeeklyView(self.views, self.app)
         self.review_view = MonthReviewView(self.views, self.app)
         self.views.add(self.daily_view, text="Daily expenses")
+        self.views.add(self.weekly_view, text="Weekly")
         self.views.add(self.review_view, text="Month in review")
         # Reports take a moment to build, so only the one in view is built, when it comes into view.
         self.bind("<Map>", lambda _e: self._show())
         self.views.bind("<<NotebookTabChanged>>", lambda _e: self._show())
 
     def redraw(self, data: PageData) -> None:
-        self.daily_view.set_data(data)
-        self.review_view.set_data(data)
+        for view in (self.daily_view, self.weekly_view, self.review_view):
+            view.set_data(data)
         self._show()
 
     def _show(self) -> None:
